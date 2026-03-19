@@ -40,20 +40,20 @@ pico_sdk_init()
 add_subdirectory(driver)
 
 # Choose entrypoint source by mode:
-# - normal mode: production `main.c`
-# - validation mode: dedicated `validation/main_validation.c` (production main excluded)
+# - normal mode: production `src/main.c`
+# - validation mode: dedicated `src/validation/main_validation.c` (production main excluded)
 
-set(APP_MAIN_SOURCE main.c)
+set(APP_MAIN_SOURCE src/main.c)
 if(PIO_TIMER_CAPTURE_VALIDATION)
-    set(APP_MAIN_SOURCE validation/main_validation.c)
+    set(APP_MAIN_SOURCE src/validation/main_validation.c)
 endif()
 
 add_executable(Costas_v1_RP2040 ${APP_MAIN_SOURCE})
 
 if(PIO_TIMER_CAPTURE_VALIDATION)
     target_sources(Costas_v1_RP2040 PRIVATE
-        validation/pio_timer_input_capture_validation.c
-        validation/pio_timer_output_compare_validation.c
+        src/validation/pio_timer_input_capture_validation.c
+        src/validation/pio_timer_output_compare_validation.c
     )
 endif()
 

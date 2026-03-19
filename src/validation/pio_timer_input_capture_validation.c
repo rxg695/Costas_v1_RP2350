@@ -5,7 +5,7 @@
 #include "pico/stdio_usb.h"
 
 #include "driver/pio_timer_input_capture/pio_timer_input_capture.h"
-#include "validation/pio_timer_input_capture_validation.h"
+#include "src/validation/pio_timer_input_capture_validation.h"
 
 void pio_timer_input_capture_validation_run(const pio_timer_input_capture_validation_config_t *config)
 {

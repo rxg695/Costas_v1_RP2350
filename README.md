@@ -60,7 +60,7 @@ The architecture is layered so low-level timing primitives remain reusable while
 
 ### 4) Validation and Test Harness
 
-- `validation/main_validation.c`: interactive USB CDC menu
+- `src/validation/main_validation.c`: interactive USB CDC menu
 - module-specific validation entrypoints for input capture and output compare
 - scope/logic-analyzer assisted verification workflows (AD2)
 

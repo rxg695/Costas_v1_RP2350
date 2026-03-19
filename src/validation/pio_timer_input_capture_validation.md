@@ -30,7 +30,7 @@ Parameters are provided by `pio_timer_input_capture_validation_config_t`.
 
 ## Invocation
 
-This logic is called from `main_validation.c` through:
+This logic is called from `src/validation/main_validation.c` through:
 
 - `pio_timer_input_capture_validation_run(&config)`
 

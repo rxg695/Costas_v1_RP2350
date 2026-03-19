@@ -2,7 +2,7 @@
 
 #include "driver/pio_timer_output_compare/pio_timer_output_compare.h"
 #include "pio_timer_output_compare.pio.h"
-#include "validation/pio_timer_output_compare_validation.h"
+#include "src/validation/pio_timer_output_compare_validation.h"
 
 static PIO resolve_pio(uint pio_index) {
     return pio_index == 1 ? pio1 : pio0;

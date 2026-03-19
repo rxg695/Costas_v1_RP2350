@@ -4,8 +4,8 @@
 #include "pico/stdlib.h"
 #include "pico/stdio_usb.h"
 
-#include "validation/pio_timer_input_capture_validation.h"
-#include "validation/pio_timer_output_compare_validation.h"
+#include "src/validation/pio_timer_input_capture_validation.h"
+#include "src/validation/pio_timer_output_compare_validation.h"
 
 typedef struct {
     uint pio_index;

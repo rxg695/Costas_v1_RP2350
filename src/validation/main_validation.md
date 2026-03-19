@@ -1,6 +1,6 @@
 # Validation Main Entrypoint
 
-`main_validation.c` is the dedicated firmware entrypoint used when `PIO_TIMER_CAPTURE_VALIDATION=ON`.
+`src/validation/main_validation.c` is the dedicated firmware entrypoint used when `PIO_TIMER_CAPTURE_VALIDATION=ON`.
 
 ## Role
 
@@ -8,7 +8,7 @@
 - Waits for USB CDC and presents an interactive validation menu.
 - Lets user choose validation module and enter run-time parameters.
 - Dispatches selected module run.
-- Keeps validation startup/routing separate from production `main.c`.
+- Keeps validation startup/routing separate from production `src/main.c`.
 
 ## Why this file exists
 
@@ -18,15 +18,15 @@
 
 ## Related files
 
-- `main.c` — production entrypoint
-- `pio_timer_input_capture_validation.c` — validation implementation
-- `pio_timer_input_capture_validation.h` — validation module API
+- `src/main.c` — production entrypoint
+- `src/validation/pio_timer_input_capture_validation.c` — validation implementation
+- `src/validation/pio_timer_input_capture_validation.h` — validation module API
 - `driver/pio_timer_output_compare/*` — output-compare validation target
 - `CMakeLists.txt` — selects this entrypoint in validation mode
 
 ## Call flow
 
-1. `main_validation.c` initializes stdio and waits for USB CDC.
+1. `src/validation/main_validation.c` initializes stdio and waits for USB CDC.
 2. Shows menu for module selection:
 	- input capture validation
 	- output compare validation

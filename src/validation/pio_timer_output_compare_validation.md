@@ -26,7 +26,7 @@ Runs interactive validation of the `pio_timer_output_compare` driver by:
 
 ## Invocation
 
-This logic is called from `main_validation.c` through:
+This logic is called from `src/validation/main_validation.c` through:
 
 - `pio_timer_output_compare_validation_run(&config)`
 
