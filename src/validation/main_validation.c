@@ -4,6 +4,7 @@
 #include "pico/stdlib.h"
 #include "pico/stdio_usb.h"
 
+#include "src/validation/pio_alarm_timer_validation.h"
 #include "src/validation/pio_event_scheduler_validation.h"
 #include "src/validation/pio_timer_input_capture_validation.h"
 #include "src/validation/pio_timer_output_compare_validation.h"
@@ -109,11 +110,22 @@ int main()
         .event_count = 16u,
     };
 
+    pio_alarm_timer_validation_config_t alarm_timer_cfg = {
+        .pio_index = 0,
+        .sm = 3,
+        .pps_pin = 6,
+        .sm_clk_hz = 100000000u,
+        .first_alarm_tick = 1000u,
+        .alarm_step_ticks = 1000u,
+        .burst_count = 8u,
+    };
+
     while (true) {
         printf("\n=== Validation Menu ===\n");
         printf("1) Input capture validation\n");
         printf("2) Output compare validation\n");
         printf("3) Scheduler validation\n");
+        printf("4) PIO alarm timer validation\n");
         printf("q) Quit menu loop\n");
         printf("Select: ");
 
@@ -163,6 +175,16 @@ int main()
             scheduler_cfg.event_count = prompt_u32("Event count", scheduler_cfg.event_count);
 
             pio_event_scheduler_validation_run(&scheduler_cfg);
+        } else if (line[0] == '4') {
+            alarm_timer_cfg.pio_index = prompt_u32("PIO index (0 or 1)", alarm_timer_cfg.pio_index);
+            alarm_timer_cfg.sm = prompt_u32("SM index", alarm_timer_cfg.sm);
+            alarm_timer_cfg.pps_pin = prompt_u32("PPS pin", alarm_timer_cfg.pps_pin);
+            alarm_timer_cfg.sm_clk_hz = prompt_u32("SM clock (Hz)", alarm_timer_cfg.sm_clk_hz);
+            alarm_timer_cfg.first_alarm_tick = prompt_u32("First alarm tick", alarm_timer_cfg.first_alarm_tick);
+            alarm_timer_cfg.alarm_step_ticks = prompt_u32("Alarm step ticks", alarm_timer_cfg.alarm_step_ticks);
+            alarm_timer_cfg.burst_count = prompt_u32("Burst count", alarm_timer_cfg.burst_count);
+
+            pio_alarm_timer_validation_run(&alarm_timer_cfg);
         } else if (line[0] == 'q' || line[0] == 'Q') {
             printf("Exiting validation menu loop\n");
             while (true) {

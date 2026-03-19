@@ -55,6 +55,7 @@ if(PIO_TIMER_CAPTURE_VALIDATION)
         src/validation/pio_timer_input_capture_validation.c
         src/validation/pio_timer_output_compare_validation.c
         src/validation/pio_event_scheduler_validation.c
+        src/validation/pio_alarm_timer_validation.c
     )
 endif()
 

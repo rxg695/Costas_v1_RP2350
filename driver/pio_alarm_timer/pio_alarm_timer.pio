@@ -1,0 +1,77 @@
+.program pio_alarm_timer
+
+; Command-driven alarm timer state machine.
+;
+; Contract:
+;   cmd == 0            -> reset counter, push 0xFFFFFFFF ACK, wait next PPS
+;   cmd > 0 and cmd==t  -> push 0 (late/equal-now)
+;   cmd > t             -> wait until t reaches cmd, push cmd
+;
+; Notes:
+; - Counter is free-running and only reset by command path.
+; - RX FIFO push events are intended to trigger CPU RX-not-empty servicing.
+; - WAIT PIN 0 is mapped to PPS input pin by host configuration.
+; - Strict immediate cmd < t detection requires richer compare than basic PIO
+;   primitives; host API monotonic guard prevents this case.
+
+.wrap_target
+entry:
+    ; Require explicit first command from host.
+    ; This avoids an implicit empty-start reset cycle.
+    pull block
+    mov y, osr
+    jmp !y do_reset
+    jmp process_cmd
+
+process_cmd:
+    ; cmd>0. If command equals current counter, treat as late.
+    mov x, isr
+    jmp x!=y wait_alarm
+
+    ; late/equal-now status = 0
+    mov isr, null
+    push block
+    ; Restore counter after push.
+    mov isr, x
+    jmp wait_next_cmd
+
+do_reset:
+    ; counter = 0
+    mov isr, null
+
+    ; push 0xFFFFFFFF ACK exactly once for this reset event
+    set x, 0
+    mov x, ~x
+    mov isr, x
+    push block
+
+wait_pps_low:
+    wait 0 pin 0
+wait_pps_high:
+    wait 1 pin 0
+
+wait_next_cmd:
+    ; Block for next explicit command to avoid empty-loop ACK flood.
+    pull block
+    mov y, osr
+    jmp !y do_reset
+    jmp process_cmd
+
+wait_alarm:
+    ; Free-running increment of 32-bit counter in ISR:
+    ; isr = isr + 1 using invert/decrement/invert transform.
+    mov x, ~isr
+    jmp x-- apply_inc
+apply_inc:
+    mov isr, ~x
+
+    ; If counter reached command tick, emit success word (cmd in Y).
+    mov x, isr
+    jmp x!=y wait_alarm
+
+    mov isr, y
+    push block
+    ; Restore counter after push (counter == y at this point).
+    mov isr, y
+    jmp wait_next_cmd
+.wrap

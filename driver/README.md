@@ -13,6 +13,8 @@ Current drivers:
   - Measures elapsed time between configurable start/stop input edges.
 - [pio_timer_output_compare](pio_timer_output_compare/README.md)
   - Schedules output pulses from trigger events with programmable delay and pulse width.
+- [pio_alarm_timer](pio_alarm_timer/README.md)
+  - Experimental command-driven PIO alarm timer with RX FIFO event reporting.
 
 ## Build integration
 
