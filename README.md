@@ -1,13 +1,13 @@
-# Costas Array Timing Firmware
+# Costas_V1_RP2350
 
-Firmware for an RP2040-based timing engine intended for PPS-disciplined Costas-array transmission experiments.
+This repository is the RP2350-targeted continuation of the earlier RP2040 timing-engine work for PPS-disciplined Costas-array transmission experiments.
 
 The long-term goal is to start a transmission from GPS PPS, step the AD9850 through a symbol plan, and measure when RF actually appears at the rig output.
 
 ## What is in the repository
 
 - PIO timing drivers for output compare, input capture, and alarm scheduling
-- An AD9850 driver built on the RP2040 SPI peripheral
+- An AD9850 driver built on the Pico SDK SPI peripheral
 - A scheduler prototype that coordinates the alarm timer, output compare, and DDS writes
 - A validation firmware build with a USB serial menu for hardware bring-up
 
@@ -87,7 +87,7 @@ Available modules cover:
 
 The expected hardware stack is:
 
-- RP2040 board
+- RP2350 board
 - AD9850 DDS stage
 - GPS receiver with PPS
 - RF detector or comparator for RF-on sensing

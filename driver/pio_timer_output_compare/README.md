@@ -80,7 +80,7 @@ There is still fixed overhead around trigger detection and pin updates, so treat
 
 ## FIFO limits
 
-The driver joins the FIFOs for TX use, which gives 8 words on RP2040. Each queued event consumes 2 words, so four full events fit before the host has to feed more data.
+The driver joins the FIFOs for TX use, which gives 8 words with the current RP2 FIFO layout. Each queued event consumes 2 words, so four full events fit before the host has to feed more data.
 
 ## Typical usage
 

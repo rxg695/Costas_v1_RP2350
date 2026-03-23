@@ -23,12 +23,12 @@ if (EXISTS ${picoVscode})
     include(${picoVscode})
 endif()
 # ====================================================================================
-set(PICO_BOARD pico CACHE STRING "Board type")
+set(PICO_BOARD pico2 CACHE STRING "Board type")
 
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
-project(Costas_v1_RP2040 C CXX ASM)
+project(Costas_V1_RP2350 C CXX ASM)
 
 # Dedicated feature toggle for PIO capture validation firmware path.
 option(PIO_TIMER_CAPTURE_VALIDATION "Enable PIO timer capture validation mode" OFF)
@@ -48,10 +48,10 @@ if(PIO_TIMER_CAPTURE_VALIDATION)
     set(APP_MAIN_SOURCE src/validation/main_validation.c)
 endif()
 
-add_executable(Costas_v1_RP2040 ${APP_MAIN_SOURCE})
+add_executable(Costas_V1_RP2350 ${APP_MAIN_SOURCE})
 
 if(PIO_TIMER_CAPTURE_VALIDATION)
-    target_sources(Costas_v1_RP2040 PRIVATE
+    target_sources(Costas_V1_RP2350 PRIVATE
         src/validation/pio_timer_input_capture_validation.c
         src/validation/pio_timer_output_compare_validation.c
         src/validation/pio_alarm_timer_validation.c
@@ -61,23 +61,23 @@ if(PIO_TIMER_CAPTURE_VALIDATION)
 endif()
 
 # Shared driver sources and generated PIO headers (used in both prod/validation).
-target_sources(Costas_v1_RP2040 PRIVATE
+target_sources(Costas_V1_RP2350 PRIVATE
     src/scheduler/scheduler.c
     ${DRIVER_SOURCES}
 )
 foreach(driver_pio_file IN LISTS DRIVER_PIO_FILES)
-    pico_generate_pio_header(Costas_v1_RP2040 ${driver_pio_file})
+    pico_generate_pio_header(Costas_V1_RP2350 ${driver_pio_file})
 endforeach()
 
-pico_set_program_name(Costas_v1_RP2040 "Costas_v1_RP2040")
-pico_set_program_version(Costas_v1_RP2040 "0.1")
+pico_set_program_name(Costas_V1_RP2350 "Costas_V1_RP2350")
+pico_set_program_version(Costas_V1_RP2350 "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(Costas_v1_RP2040 0)
-pico_enable_stdio_usb(Costas_v1_RP2040 1)
+pico_enable_stdio_uart(Costas_V1_RP2350 0)
+pico_enable_stdio_usb(Costas_V1_RP2350 1)
 
 # Add the standard library to the build
-target_link_libraries(Costas_v1_RP2040
+target_link_libraries(Costas_V1_RP2350
     pico_stdlib
     # Driver modules rely on direct PIO and clock APIs in both modes.
     hardware_pio
@@ -86,9 +86,9 @@ target_link_libraries(Costas_v1_RP2040
 )
 
 # Add the standard include files to the build
-target_include_directories(Costas_v1_RP2040 PRIVATE
+target_include_directories(Costas_V1_RP2350 PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
 )
 
-pico_add_extra_outputs(Costas_v1_RP2040)
+pico_add_extra_outputs(Costas_V1_RP2350)
 

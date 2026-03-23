@@ -1,6 +1,6 @@
 # AD9850 Driver
 
-Low-level AD9850 support built on the RP2040 SPI peripheral.
+Low-level AD9850 support built on the Pico SDK SPI peripheral.
 
 ## Responsibilities
 
@@ -29,7 +29,7 @@ Static configuration for one driver instance.
 
 - `spi`: `spi0` or `spi1`
 - `spi_baud_hz`: SPI clock used for frame writes
-- `sck_pin`, `mosi_pin`: RP2040 pins mapped to the SPI peripheral
+- `sck_pin`, `mosi_pin`: GPIO pins mapped to the SPI peripheral
 - `use_fqud_pin`, `fqud_pin`: optional latch pin control
 - `use_reset_pin`, `reset_pin`: optional hardware reset control
 - `dds_sysclk_hz`: DDS reference clock used by FTW conversion

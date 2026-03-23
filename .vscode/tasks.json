@@ -137,7 +137,7 @@
             "command": "${env:HOME}/.pico-sdk/picotool/2.2.0-a4/picotool/picotool",
             "args": [
                 "load",
-                "${workspaceFolder}/build_validation/Costas_v1_RP2040.elf",
+                "${workspaceFolder}/build_validation/Costas_V1_RP2350.elf",
                 "-fx"
             ],
             "dependsOn": [

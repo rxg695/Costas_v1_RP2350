@@ -7,7 +7,7 @@ This directory holds the reusable hardware-facing pieces shared by the normal an
 - [pio_timer_input_capture/README.md](pio_timer_input_capture/README.md): measures the time between a start edge and a stop edge
 - [pio_timer_output_compare/README.md](pio_timer_output_compare/README.md): emits a delayed pulse after a trigger
 - [pio_alarm_timer/README.md](pio_alarm_timer/README.md): command-driven timer with PPS-based rearm behavior
-- [ad9850_driver/README.md](ad9850_driver/README.md): AD9850 transport over RP2040 SPI
+- [ad9850_driver/README.md](ad9850_driver/README.md): AD9850 transport over the Pico SDK SPI layer
 
 Together these modules provide the low-level timing and DDS control pieces used by the scheduler layer in [src/scheduler/README.md](../src/scheduler/README.md).
 

@@ -152,7 +152,7 @@ int main()
     };
 
     while (true) {
-        printf("\n=== RP2040 Validation Console ===\n");
+        printf("\n=== RP2350 Validation Console ===\n");
         printf("1) Input capture       Measure delay from a start edge to a stop edge\n");
         printf("2) Output compare      Generate delayed pulses from a trigger\n");
         printf("3) Alarm timer         Queue PPS-gated alarm events\n");

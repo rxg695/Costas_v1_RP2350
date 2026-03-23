@@ -21,7 +21,7 @@ typedef struct {
  * @brief Static configuration for one AD9850 driver instance.
  */
 typedef struct {
-    /** RP2040 SPI peripheral instance, typically @c spi0 or @c spi1. */
+    /** SPI peripheral instance, typically @c spi0 or @c spi1. */
     spi_inst_t *spi;
     /** SPI bit rate used for 40-bit frame transfers. */
     uint32_t spi_baud_hz;
