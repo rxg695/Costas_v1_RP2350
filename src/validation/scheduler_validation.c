@@ -4,13 +4,21 @@
 #include "hardware/spi.h"
 #include "pico/stdlib.h"
 #include "src/scheduler/scheduler.h"
+#include "src/validation/validation_config.h"
 #include "src/validation/scheduler_validation.h"
-
-#define SCHEDULER_OUTPUT_SCALE 5u
 
 static PIO resolve_pio(uint pio_index)
 {
-    return pio_index == 1 ? pio1 : pio0;
+    switch (pio_index) {
+    case 0:
+        return pio0;
+    case 1:
+        return pio1;
+    case 2:
+        return pio2;
+    default:
+        return pio0;
+    }
 }
 
 static spi_inst_t *resolve_spi(uint spi_index)
@@ -21,12 +29,12 @@ static spi_inst_t *resolve_spi(uint spi_index)
 static uint32_t us_to_ticks(uint32_t us,
                             uint32_t sm_clk_hz)
 {
-    uint64_t ticks = ((uint64_t) us * (uint64_t) sm_clk_hz) / 1000000ull;
+    uint64_t ticks = ((uint64_t) us * (uint64_t) sm_clk_hz) / VALIDATION_USEC_PER_SEC;
     if (ticks == 0u) {
         return 1u;
     }
-    if (ticks > 0xFFFFFFFFull) {
-        return 0xFFFFFFFFu;
+    if (ticks > VALIDATION_U32_MAX_VALUE) {
+        return VALIDATION_U32_MAX_VALUE;
     }
     return (uint32_t) ticks;
 }
@@ -35,11 +43,26 @@ static uint32_t us_to_scheduler_request_ticks(uint32_t us,
                                               uint32_t sm_clk_hz)
 {
     uint32_t raw_ticks = us_to_ticks(us, sm_clk_hz);
-    uint32_t request_ticks = raw_ticks / SCHEDULER_OUTPUT_SCALE;
+    uint32_t request_ticks = raw_ticks / VALIDATION_SCHEDULER_OUTPUT_SCALE;
     if (request_ticks == 0u) {
         request_ticks = 1u;
     }
     return request_ticks;
+}
+
+static uint32_t timing_sm_clk_hz(const scheduler_validation_config_t *cfg)
+{
+    if (cfg == NULL || cfg->sm_clk_hz == 0u) {
+        return 0u;
+    }
+
+    if (cfg->configured_sys_clk_hz == 0u || cfg->timing_sys_clk_hz == 0u) {
+        return cfg->sm_clk_hz;
+    }
+
+    return (uint32_t) ((((uint64_t) cfg->sm_clk_hz * cfg->timing_sys_clk_hz) +
+                        (cfg->configured_sys_clk_hz / 2u)) /
+                       cfg->configured_sys_clk_hz);
 }
 
 static const char *state_name(scheduler_state_t state)
@@ -121,7 +144,7 @@ static bool read_line(char *buffer,
 static uint32_t prompt_u32(const char *label,
                            uint32_t default_value)
 {
-    char line[64];
+    char line[VALIDATION_CONSOLE_PROMPT_BUFFER_SIZE];
     printf("%s [%lu]: ", label, (unsigned long) default_value);
     fflush(stdout);
     read_line(line, sizeof(line));
@@ -142,7 +165,7 @@ static uint32_t prompt_u32(const char *label,
 static int32_t prompt_i32(const char *label,
                           int32_t default_value)
 {
-    char line[64];
+    char line[VALIDATION_CONSOLE_PROMPT_BUFFER_SIZE];
     printf("%s [%ld]: ", label, (long) default_value);
     fflush(stdout);
     read_line(line, sizeof(line));
@@ -167,9 +190,9 @@ static void prompt_common_config(scheduler_validation_config_t *cfg)
     }
 
     cfg->output_compare_pio_index =
-        prompt_u32("Output compare PIO index (0 or 1)", cfg->output_compare_pio_index);
+        prompt_u32("Output compare PIO index (0, 1, or 2)", cfg->output_compare_pio_index);
     cfg->alarm_timer_pio_index =
-        prompt_u32("Alarm timer PIO index (0 or 1)", cfg->alarm_timer_pio_index);
+        prompt_u32("Alarm timer PIO index (0, 1, or 2)", cfg->alarm_timer_pio_index);
     cfg->output_compare_sm = prompt_u32("Output compare SM index", cfg->output_compare_sm);
     cfg->alarm_timer_sm = prompt_u32("Alarm timer SM index", cfg->alarm_timer_sm);
     cfg->pps_pin = prompt_u32("PPS pin", cfg->pps_pin);
@@ -183,6 +206,7 @@ static void prompt_common_config(scheduler_validation_config_t *cfg)
     cfg->ad9850_sck_pin = prompt_u32("AD9850 SCK pin", cfg->ad9850_sck_pin);
     cfg->ad9850_mosi_pin = prompt_u32("AD9850 MOSI pin", cfg->ad9850_mosi_pin);
     cfg->ad9850_fqud_pin = prompt_u32("AD9850 FQ_UD pin", cfg->ad9850_fqud_pin);
+    cfg->ad9850_fqud_pulse_us = prompt_u32("AD9850 FQ_UD pulse length (us)", cfg->ad9850_fqud_pulse_us);
     cfg->ad9850_reset_pin = prompt_u32("AD9850 reset pin", cfg->ad9850_reset_pin);
     cfg->ad9850_sysclk_hz = prompt_u32("AD9850 sysclk (Hz)", cfg->ad9850_sysclk_hz);
 
@@ -197,11 +221,11 @@ static void fill_prepare_request(const scheduler_validation_config_t *cfg,
                                  uint32_t *dts_ticks,
                                  uint32_t *freq_hz)
 {
-    static const uint32_t defaults[8] = {1500u, 900u, 1800u, 600u, 2400u, 2100u, 1200u, 0u};
+    static const uint32_t defaults[VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT] = VALIDATION_SCHEDULER_DEFAULT_FREQ_HZ_LIST;
 
-    uint32_t symbol_count = cfg->symbol_count == 0u ? 8u : cfg->symbol_count;
-    if (symbol_count > 8u) {
-        symbol_count = 8u;
+    uint32_t symbol_count = cfg->symbol_count == 0u ? VALIDATION_SCHEDULER_DEFAULT_SYMBOL_COUNT : cfg->symbol_count;
+    if (symbol_count > VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT) {
+        symbol_count = VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT;
     }
 
     for (uint32_t i = 0u; i < symbol_count; ++i) {
@@ -209,12 +233,13 @@ static void fill_prepare_request(const scheduler_validation_config_t *cfg,
         freq_hz[i] = defaults[i];
     }
 
+    uint32_t resolved_timing_sm_clk_hz = timing_sm_clk_hz(cfg);
     request->symbol_count = symbol_count;
-    request->dt0 = us_to_scheduler_request_ticks(cfg->dt0_us, cfg->sm_clk_hz);
+    request->dt0 = us_to_scheduler_request_ticks(cfg->dt0_us, resolved_timing_sm_clk_hz);
     request->dts = dts_ticks;
     request->load_offset = (int32_t) us_to_scheduler_request_ticks(
         (uint32_t) (cfg->load_offset_us < 0 ? -cfg->load_offset_us : cfg->load_offset_us),
-        cfg->sm_clk_hz);
+        resolved_timing_sm_clk_hz);
     if (cfg->load_offset_us < 0) {
         request->load_offset = -request->load_offset;
     }
@@ -225,6 +250,7 @@ static void fill_prepare_request(const scheduler_validation_config_t *cfg,
 static bool init_scheduler(const scheduler_validation_config_t *cfg,
                            scheduler_t *scheduler)
 {
+    uint32_t resolved_timing_sm_clk_hz = timing_sm_clk_hz(cfg);
     scheduler_config_t scheduler_cfg = {
         .output_compare_pio = resolve_pio(cfg->output_compare_pio_index),
         .alarm_timer_pio = resolve_pio(cfg->alarm_timer_pio_index),
@@ -234,13 +260,14 @@ static bool init_scheduler(const scheduler_validation_config_t *cfg,
         .output_pin = cfg->output_pin,
         .pps_pin = cfg->pps_pin,
         .sm_clk_hz = cfg->sm_clk_hz,
-        .output_pulse_ticks = us_to_ticks(cfg->output_pulse_us, cfg->sm_clk_hz),
+        .output_pulse_ticks = us_to_ticks(cfg->output_pulse_us, resolved_timing_sm_clk_hz),
         .ad9850_spi = resolve_spi(cfg->ad9850_spi_index),
         .ad9850_spi_baud_hz = cfg->ad9850_spi_baud_hz,
         .ad9850_sck_pin = cfg->ad9850_sck_pin,
         .ad9850_mosi_pin = cfg->ad9850_mosi_pin,
         .ad9850_use_fqud_pin = cfg->ad9850_use_fqud_pin,
         .ad9850_fqud_pin = cfg->ad9850_fqud_pin,
+        .ad9850_fqud_pulse_us = cfg->ad9850_fqud_pulse_us,
         .ad9850_use_reset_pin = cfg->ad9850_use_reset_pin,
         .ad9850_reset_pin = cfg->ad9850_reset_pin,
         .ad9850_sysclk_hz = cfg->ad9850_sysclk_hz,
@@ -291,8 +318,8 @@ static void run_sequence_building(scheduler_validation_config_t *cfg)
     }
 
     scheduler_prepare_request_t request;
-    uint32_t dts_ticks[8];
-    uint32_t freq_hz[8];
+    uint32_t dts_ticks[VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT];
+    uint32_t freq_hz[VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT];
     fill_prepare_request(cfg, &request, dts_ticks, freq_hz);
 
     bool ok = scheduler_prepare(&scheduler, &request);
@@ -339,8 +366,8 @@ static void run_prepare_preload(scheduler_validation_config_t *cfg)
     }
 
     scheduler_prepare_request_t request;
-    uint32_t dts_ticks[8];
-    uint32_t freq_hz[8];
+    uint32_t dts_ticks[VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT];
+    uint32_t freq_hz[VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT];
     fill_prepare_request(cfg, &request, dts_ticks, freq_hz);
 
     bool ok = scheduler_prepare(&scheduler, &request);
@@ -367,8 +394,8 @@ static void run_timer_orchestration(scheduler_validation_config_t *cfg)
     }
 
     scheduler_prepare_request_t request;
-    uint32_t dts_ticks[8];
-    uint32_t freq_hz[8];
+    uint32_t dts_ticks[VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT];
+    uint32_t freq_hz[VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT];
     fill_prepare_request(cfg, &request, dts_ticks, freq_hz);
 
     if (!scheduler_prepare(&scheduler, &request)) {
@@ -444,8 +471,8 @@ static void run_full_integration(scheduler_validation_config_t *cfg)
             }
 
             scheduler_prepare_request_t request;
-            uint32_t dts_ticks[8];
-            uint32_t freq_hz[8];
+            uint32_t dts_ticks[VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT];
+            uint32_t freq_hz[VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT];
             fill_prepare_request(cfg, &request, dts_ticks, freq_hz);
 
             bool ok = scheduler_prepare(&scheduler, &request);
@@ -506,7 +533,7 @@ void scheduler_validation_run(const scheduler_validation_config_t *config)
         printf("q) Return\n");
         printf("Choose a scheduler mode: ");
 
-        char line[16];
+        char line[VALIDATION_CONSOLE_LINE_BUFFER_SIZE];
         read_line(line, sizeof(line));
 
         if (line[0] == 'a' || line[0] == 'A') {

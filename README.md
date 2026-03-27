@@ -64,6 +64,8 @@ The intended transmit flow is:
 
 Only part of that path is implemented end to end. The current codebase mainly provides the timing primitives and validation harness needed to build toward it.
 
+In the current scheduler validation path, the generated output pulse is intentionally reused as the AD9850 `FQ_UD` latch pulse. Validation therefore checks both pulse timing and DDS-latch timing with the same signal.
+
 ## Validation workflow
 
 Build the `validation` preset, flash it, open the USB serial console, and select a module from the menu. The validation firmware is the fastest way to confirm pin mapping, timing assumptions, and PIO program behavior on hardware.
@@ -82,6 +84,13 @@ Available modules cover:
 2. add PTT and rig-settle timing to the scheduler path
 3. feed RF-on capture back into the transmit sequence
 4. define the telemetry format and send path
+
+## TODO
+
+- Document the intentional shared-pin scheduler validation path where the output pulse is also the AD9850 `FQ_UD` pulse. The AD9850 driver can still bit-bang `FQ_UD` for non-timing-critical operations, but the timing-critical path is driven by the PIO output-compare state machine.
+- Add a thorough scheduler timeline and timing-logic write-up that explains the full event chain, including the PPS rearm path, alarm scheduling, output-compare timing, SPI transfer timing, and the design assumption that each DDS write must complete before the next alarm boundary.
+- Refactor PIO interrupt ownership and scheduler/alarm registries so multiple subsystems can coexist more cleanly instead of relying on one exclusive owner per PIO interrupt line.
+- Audit and remove the remaining RP2040-era workspace and tooling assumptions. The main source tree is already targeted at `pico2`/RP2350, but IntelliSense, debug configuration, and host-specific task wiring still assume an ARM-only Cortex-Debug flow in places.
 
 ## Hardware notes
 

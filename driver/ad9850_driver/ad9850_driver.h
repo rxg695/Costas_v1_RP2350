@@ -10,8 +10,10 @@
 /**
  * @brief AD9850 serial frame in transmit order.
  *
- * The AD9850 expects the four FTW bytes least-significant first, followed by
- * the control byte.
+ * The logical frame order is the four FTW bytes least-significant first,
+ * followed by the control byte. The driver bit-reverses each byte at transmit
+ * time because the RP-series SPI block only supports MSB-first shifting while
+ * the AD9850 serial input expects LSB-first bit order.
  */
 typedef struct {
     uint8_t bytes[5];
@@ -35,6 +37,8 @@ typedef struct {
     bool use_fqud_pin;
     /** GPIO used for FQ_UD when enabled. */
     uint fqud_pin;
+    /** High time of the FQ_UD pulse in microseconds. */
+    uint32_t fqud_pulse_us;
 
     /** Enables use of the hardware reset pin. */
     bool use_reset_pin;
@@ -58,9 +62,12 @@ typedef struct {
 
     /** SCK pin reused for the manual W_CLK pulse during serial-enable. */
     uint sck_pin;
+    /** MOSI pin reused to drive startup serial bits during serial-enable. */
+    uint mosi_pin;
 
     bool use_fqud_pin;
     uint fqud_pin;
+    uint32_t fqud_pulse_us;
 
     bool use_reset_pin;
     uint reset_pin;
@@ -128,8 +135,8 @@ bool ad9850_driver_pulse_fqud(const ad9850_driver_t *driver);
 /**
  * @brief Runs the AD9850 serial-enable sequence.
  *
- * This performs RESET, a manual W_CLK pulse, and an FQ_UD pulse, then unlocks
- * the write path.
+ * This performs RESET, manually latches the strapped parallel startup word to
+ * enter serial mode, then unlocks the write path.
  */
 bool ad9850_driver_serial_enable(ad9850_driver_t *driver);
 

@@ -23,6 +23,11 @@ Packed 5-byte AD9850 frame in transmit order.
 - `bytes[0..3]`: FTW, least-significant byte first
 - `bytes[4]`: control byte with phase in bits `7:3` and power-down in bit `2`
 
+The AD9850 serial port expects those fields in that byte order, but each byte is
+shifted least-significant bit first on the wire. The Pico SDK SPI block only
+supports MSB-first shifting on this target, so the driver bit-reverses each
+byte before transmission.
+
 ### `ad9850_driver_config_t`
 
 Static configuration for one driver instance.
@@ -31,6 +36,7 @@ Static configuration for one driver instance.
 - `spi_baud_hz`: SPI clock used for frame writes
 - `sck_pin`, `mosi_pin`: GPIO pins mapped to the SPI peripheral
 - `use_fqud_pin`, `fqud_pin`: optional latch pin control
+- `fqud_pulse_us`: high time of the `FQ_UD` pulse in microseconds
 - `use_reset_pin`, `reset_pin`: optional hardware reset control
 - `dds_sysclk_hz`: DDS reference clock used by FTW conversion
 
@@ -48,6 +54,9 @@ The transmitted bytes are:
 4. FTW bits 31:24
 5. control byte with phase in bits 7:3 and power-down in bit 2
 
+On the wire, each of those bytes is transmitted least-significant bit first as
+required by the AD9850 serial-load format.
+
 ## API reference
 
 ### `ad9850_driver_init(...)`
@@ -61,8 +70,7 @@ Returns `false` if the config is incomplete or obviously invalid.
 Runs the AD9850 startup sequence required by this driver:
 
 1. pulse `RESET` if that pin is enabled
-2. pulse `W_CLK` manually on the configured SCK pin
-3. pulse `FQ_UD`
+2. manually pulse `W_CLK` once and pulse `FQ_UD` to latch the strapped parallel startup word
 
 On success, the driver unlocks the write path.
 
@@ -98,6 +106,8 @@ Returns `false` if:
 ### `ad9850_driver_apply_frame_blocking(...)`
 
 Writes a frame and optionally pulses `FQ_UD` afterward. This is the easiest API for bench testing and simple bring-up code.
+
+The `FQ_UD` pulse width comes from `ad9850_driver_config_t.fqud_pulse_us` and is shared by the blocking, startup, and non-blocking paths.
 
 ### `ad9850_driver_start_apply_nonblocking(...)`
 

@@ -3,6 +3,22 @@
 #include "hardware/clocks.h"
 #include "pio_timer_input_capture.pio.h"
 
+#define PIO_TIMER_INPUT_CAPTURE_PIO_COUNT 3u
+
+static int pio_timer_input_capture_pio_index(PIO pio)
+{
+    if (pio == pio0) {
+        return 0;
+    }
+    if (pio == pio1) {
+        return 1;
+    }
+    if (pio == pio2) {
+        return 2;
+    }
+    return -1;
+}
+
 void pio_timer_input_capture_init(pio_timer_input_capture_t *capture,
                                   PIO pio,
                                   uint sm,
@@ -11,6 +27,14 @@ void pio_timer_input_capture_init(pio_timer_input_capture_t *capture,
                                   uint32_t sm_clk_hz,
                                   uint32_t timeout_ns)
 {
+    static bool program_loaded[PIO_TIMER_INPUT_CAPTURE_PIO_COUNT] = {false};
+    static uint program_offset[PIO_TIMER_INPUT_CAPTURE_PIO_COUNT] = {0u};
+
+    int pio_index = pio_timer_input_capture_pio_index(pio);
+    if (capture == NULL || pio_index < 0) {
+        return;
+    }
+
     capture->pio = pio;
     capture->sm = sm;
     capture->start_pin = start_pin;
@@ -22,7 +46,11 @@ void pio_timer_input_capture_init(pio_timer_input_capture_t *capture,
     uint64_t timeout_loops_64 = ((uint64_t) timeout_ns * sm_clk_hz) / 2000000000ull;
     capture->timeout_loops = (uint32_t) timeout_loops_64;
 
-    capture->offset = pio_add_program(pio, &pio_timer_input_capture_program);
+    if (!program_loaded[pio_index]) {
+        program_offset[pio_index] = pio_add_program(pio, &pio_timer_input_capture_program);
+        program_loaded[pio_index] = true;
+    }
+    capture->offset = program_offset[pio_index];
 
     pio_gpio_init(pio, start_pin);
     pio_gpio_init(pio, stop_pin);
@@ -39,6 +67,8 @@ void pio_timer_input_capture_init(pio_timer_input_capture_t *capture,
 
     sm_config_set_jmp_pin(&config, stop_pin);
 
+    pio_sm_set_enabled(pio, sm, false);
+    pio_sm_clear_fifos(pio, sm);
     pio_sm_init(pio, sm, capture->offset, &config);
     pio_sm_put_blocking(pio, sm, capture->timeout_loops);
     pio_sm_set_enabled(pio, sm, true);

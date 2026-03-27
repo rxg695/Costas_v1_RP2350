@@ -2,6 +2,7 @@
 
 #include "driver/pio_alarm_timer/pio_alarm_timer.h"
 #include "pio_alarm_timer.pio.h"
+#include "src/validation/validation_config.h"
 #include "src/validation/pio_alarm_timer_validation.h"
 
 typedef struct {
@@ -16,12 +17,18 @@ typedef struct {
     uint32_t fired_logged;
 } alarm_validation_runtime_t;
 
-// One alarm-timer tick currently spans five state-machine cycles.
-#define PIO_ALARM_TIMER_CYCLES_PER_TICK 5u
-
 static PIO resolve_pio(uint pio_index)
 {
-    return pio_index == 1 ? pio1 : pio0;
+    switch (pio_index) {
+    case 0:
+        return pio0;
+    case 1:
+        return pio1;
+    case 2:
+        return pio2;
+    default:
+        return pio0;
+    }
 }
 
 static void on_alarm_result(const pio_alarm_timer_result_t *result,
@@ -60,7 +67,7 @@ static const char *enqueue_status_str(pio_alarm_timer_enqueue_status_t status)
 static uint32_t ticks_to_us(uint32_t ticks,
                             uint32_t sm_clk_hz)
 {
-    uint64_t numerator = (uint64_t) ticks * (uint64_t) PIO_ALARM_TIMER_CYCLES_PER_TICK * 1000000ull;
+    uint64_t numerator = (uint64_t) ticks * (uint64_t) VALIDATION_ALARM_TIMER_CYCLES_PER_TICK * VALIDATION_USEC_PER_SEC;
     return (uint32_t) (numerator / (uint64_t) sm_clk_hz);
 }
 
@@ -83,11 +90,15 @@ static void print_runtime_summary(const alarm_validation_runtime_t *runtime,
 
 void pio_alarm_timer_validation_run(const pio_alarm_timer_validation_config_t *config)
 {
-    static bool program_loaded[2] = {false, false};
-    static uint program_offset[2] = {0, 0};
+    static bool program_loaded[VALIDATION_ALARM_TIMER_VALIDATION_PIO_COUNT] = {false};
+    static uint program_offset[VALIDATION_ALARM_TIMER_VALIDATION_PIO_COUNT] = {0u};
+    uint32_t timing_sm_clk_hz = config->timing_sm_clk_hz == 0u ? config->sm_clk_hz : config->timing_sm_clk_hz;
 
     PIO pio = resolve_pio(config->pio_index);
-    uint slot = config->pio_index == 1 ? 1u : 0u;
+    uint slot = config->pio_index;
+    if (slot >= VALIDATION_ALARM_TIMER_VALIDATION_PIO_COUNT) {
+        slot = 0u;
+    }
 
     if (!program_loaded[slot]) {
         program_offset[slot] = pio_add_program(pio, &pio_alarm_timer_program);
@@ -118,25 +129,26 @@ void pio_alarm_timer_validation_run(const pio_alarm_timer_validation_config_t *c
 
     uint32_t next_alarm_tick = config->first_alarm_tick;
     if (next_alarm_tick == 0u) {
-        next_alarm_tick = 1000u;
+        next_alarm_tick = VALIDATION_ALARM_TIMER_DEFAULT_FIRST_TICK;
     }
 
     uint32_t alarm_step_ticks = config->alarm_step_ticks;
     if (alarm_step_ticks == 0u) {
-        alarm_step_ticks = 1000u;
+        alarm_step_ticks = VALIDATION_ALARM_TIMER_DEFAULT_STEP_TICKS;
     }
 
     uint32_t burst_count = config->burst_count;
     if (burst_count == 0u) {
-        burst_count = 8u;
+        burst_count = VALIDATION_ALARM_TIMER_DEFAULT_BURST_COUNT;
     }
 
         printf("\nAlarm timer validation active\n");
-        printf("PIO%u SM%u PPS=GP%u state-machine clock=%lu Hz\n",
+          printf("PIO%u SM%u PPS=GP%u state-machine clock=%lu Hz, timing clock=%lu Hz\n",
            config->pio_index,
            config->sm,
             config->pps_pin,
-           (unsigned long) config->sm_clk_hz);
+              (unsigned long) config->sm_clk_hz,
+              (unsigned long) timing_sm_clk_hz);
         printf("Schedule:\n");
         printf("  First tick: %lu\n",
            (unsigned long) next_alarm_tick);
@@ -146,11 +158,11 @@ void pio_alarm_timer_validation_run(const pio_alarm_timer_validation_config_t *c
             (unsigned long) burst_count);
         printf("Timing:\n");
         printf("  One timer tick currently equals %u state-machine cycles\n",
-            (unsigned) PIO_ALARM_TIMER_CYCLES_PER_TICK);
+            (unsigned) VALIDATION_ALARM_TIMER_CYCLES_PER_TICK);
         printf("  First tick ~= %lu us\n",
-            (unsigned long) ticks_to_us(next_alarm_tick, config->sm_clk_hz));
+            (unsigned long) ticks_to_us(next_alarm_tick, timing_sm_clk_hz));
         printf("  Tick step ~= %lu us\n",
-            (unsigned long) ticks_to_us(alarm_step_ticks, config->sm_clk_hz));
+            (unsigned long) ticks_to_us(alarm_step_ticks, timing_sm_clk_hz));
         printf("Startup rearm: %s; waiting for PPS on GP%u\n",
             initial_rearm_ok ? "queued" : "failed",
             config->pps_pin);
@@ -178,7 +190,7 @@ void pio_alarm_timer_validation_run(const pio_alarm_timer_validation_config_t *c
             printf("  Tick: %lu\n",
                    (unsigned long) runtime.last_fired_tick);
             printf("  Approximate time: %lu us\n",
-                   (unsigned long) ticks_to_us(runtime.last_fired_tick, config->sm_clk_hz));
+                     (unsigned long) ticks_to_us(runtime.last_fired_tick, timing_sm_clk_hz));
         }
 
         int ch = getchar_timeout_us(0);
@@ -190,7 +202,9 @@ void pio_alarm_timer_validation_run(const pio_alarm_timer_validation_config_t *c
         if (ch == 'r' || ch == 'R') {
             bool ok = pio_alarm_timer_queue_rearm(&timer);
             printf("Queue rearm: %s\n", ok ? "ok" : "failed");
-            next_alarm_tick = config->first_alarm_tick == 0u ? 1000u : config->first_alarm_tick;
+            next_alarm_tick = config->first_alarm_tick == 0u
+                                 ? VALIDATION_ALARM_TIMER_DEFAULT_FIRST_TICK
+                                 : config->first_alarm_tick;
         } else if (ch == 'a' || ch == 'A') {
             pio_alarm_timer_enqueue_status_t status =
                 pio_alarm_timer_queue_alarm(&timer, next_alarm_tick);
@@ -199,8 +213,8 @@ void pio_alarm_timer_validation_run(const pio_alarm_timer_validation_config_t *c
                    (unsigned long) next_alarm_tick,
                    (unsigned long) next_alarm_tick);
             printf("  Approximate time: %lu us\n",
-                   (unsigned long) ticks_to_us(next_alarm_tick, config->sm_clk_hz),
-                   (unsigned long) ticks_to_us(next_alarm_tick, config->sm_clk_hz));
+                     (unsigned long) ticks_to_us(next_alarm_tick, timing_sm_clk_hz),
+                     (unsigned long) ticks_to_us(next_alarm_tick, timing_sm_clk_hz));
             printf("  Status: %s\n", enqueue_status_str(status));
             if (status == PIO_ALARM_TIMER_ENQUEUE_OK) {
                 next_alarm_tick += alarm_step_ticks;
@@ -228,7 +242,7 @@ void pio_alarm_timer_validation_run(const pio_alarm_timer_validation_config_t *c
         } else if (ch == 'd' || ch == 'D') {
             uint32_t descending_tick = next_alarm_tick > alarm_step_ticks
                                            ? (next_alarm_tick - alarm_step_ticks)
-                                           : 1u;
+                                           : VALIDATION_SYSCLK_STABILITY_MIN_SAMPLES_FALLBACK;
             pio_alarm_timer_enqueue_status_t status =
                 pio_alarm_timer_queue_alarm(&timer, descending_tick);
             printf("Queue descending tick test:\n");
@@ -236,11 +250,13 @@ void pio_alarm_timer_validation_run(const pio_alarm_timer_validation_config_t *c
                    (unsigned long) descending_tick,
                    (unsigned long) descending_tick);
             printf("  Approximate time: %lu us\n",
-                   (unsigned long) ticks_to_us(descending_tick, config->sm_clk_hz));
+                     (unsigned long) ticks_to_us(descending_tick, timing_sm_clk_hz));
             printf("  Status: %s\n", enqueue_status_str(status));
-            next_alarm_tick = config->first_alarm_tick == 0u ? 1000u : config->first_alarm_tick;
+            next_alarm_tick = config->first_alarm_tick == 0u
+                                 ? VALIDATION_ALARM_TIMER_DEFAULT_FIRST_TICK
+                                 : config->first_alarm_tick;
         } else if (ch == 's' || ch == 'S') {
-            print_runtime_summary(&runtime, config->sm_clk_hz);
+                 print_runtime_summary(&runtime, timing_sm_clk_hz);
         } else if (ch == 'q' || ch == 'Q') {
             printf("Leaving PIO alarm timer validation\n");
             break;

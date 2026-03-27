@@ -3,6 +3,32 @@
 #include "hardware/gpio.h"
 #include "hardware/spi.h"
 
+static uint8_t ad9850_reverse_bits(uint8_t value)
+{
+    value = (uint8_t) (((value & 0xF0u) >> 4) | ((value & 0x0Fu) << 4));
+    value = (uint8_t) (((value & 0xCCu) >> 2) | ((value & 0x33u) << 2));
+    value = (uint8_t) (((value & 0xAAu) >> 1) | ((value & 0x55u) << 1));
+    return value;
+}
+
+static void ad9850_encode_wire_frame(const ad9850_frame_t *frame,
+                                     uint8_t wire_bytes[5])
+{
+    for (uint i = 0u; i < 5u; ++i) {
+        wire_bytes[i] = ad9850_reverse_bits(frame->bytes[i]);
+    }
+}
+
+static void ad9850_manual_wclk_pulse(uint sck_pin)
+{
+    gpio_put(sck_pin, 0);
+    sleep_us(1);
+    gpio_put(sck_pin, 1);
+    sleep_us(1);
+    gpio_put(sck_pin, 0);
+    sleep_us(1);
+}
+
 static bool ad9850_valid_phase(uint8_t phase)
 {
     return phase <= 31u;
@@ -41,8 +67,10 @@ bool ad9850_driver_init(ad9850_driver_t *driver,
     driver->spi = config->spi;
     driver->dds_sysclk_hz = config->dds_sysclk_hz;
     driver->sck_pin = config->sck_pin;
+    driver->mosi_pin = config->mosi_pin;
     driver->use_fqud_pin = config->use_fqud_pin;
     driver->fqud_pin = config->fqud_pin;
+    driver->fqud_pulse_us = config->fqud_pulse_us == 0u ? 1u : config->fqud_pulse_us;
     driver->use_reset_pin = config->use_reset_pin;
     driver->reset_pin = config->reset_pin;
     driver->tx_active = false;
@@ -79,15 +107,15 @@ bool ad9850_driver_make_frame(uint32_t ftw,
         return false;
     }
 
-    frame_out->bytes[0] = (uint8_t) (ftw & 0xFFu);
-    frame_out->bytes[1] = (uint8_t) ((ftw >> 8) & 0xFFu);
-    frame_out->bytes[2] = (uint8_t) ((ftw >> 16) & 0xFFu);
-    frame_out->bytes[3] = (uint8_t) ((ftw >> 24) & 0xFFu);
-
     uint8_t control = (uint8_t) ((phase & 0x1Fu) << 3);
     if (power_down) {
         control |= 0x04u;
     }
+
+    frame_out->bytes[0] = (uint8_t) (ftw & 0xFFu);
+    frame_out->bytes[1] = (uint8_t) ((ftw >> 8) & 0xFFu);
+    frame_out->bytes[2] = (uint8_t) ((ftw >> 16) & 0xFFu);
+    frame_out->bytes[3] = (uint8_t) ((ftw >> 24) & 0xFFu);
     frame_out->bytes[4] = control;
 
     return true;
@@ -116,7 +144,10 @@ bool ad9850_driver_write_frame_blocking(const ad9850_driver_t *driver,
         return false;
     }
 
-    int rc = spi_write_blocking(driver->spi, frame->bytes, 5);
+    uint8_t wire_bytes[5];
+    ad9850_encode_wire_frame(frame, wire_bytes);
+
+    int rc = spi_write_blocking(driver->spi, wire_bytes, 5);
     return rc == 5;
 }
 
@@ -127,7 +158,7 @@ bool ad9850_driver_pulse_fqud(const ad9850_driver_t *driver)
     }
 
     gpio_put(driver->fqud_pin, 1);
-    sleep_us(1);
+    busy_wait_us_32(driver->fqud_pulse_us);
     gpio_put(driver->fqud_pin, 0);
     return true;
 }
@@ -137,6 +168,9 @@ bool ad9850_driver_serial_enable(ad9850_driver_t *driver)
     if (driver == NULL || !driver->initialized) {
         return false;
     }
+    if (!driver->use_fqud_pin) {
+        return false;
+    }
 
     if (driver->use_reset_pin) {
         if (!ad9850_driver_reset(driver)) {
@@ -144,24 +178,17 @@ bool ad9850_driver_serial_enable(ad9850_driver_t *driver)
         }
     }
 
-    // The AD9850 serial-enable sequence needs a manual W_CLK pulse.
+    // Latch the strapped startup word to enter serial mode.
     gpio_set_function(driver->sck_pin, GPIO_FUNC_SIO);
     gpio_set_dir(driver->sck_pin, GPIO_OUT);
-    gpio_put(driver->sck_pin, 0);
-    sleep_us(1);
-    gpio_put(driver->sck_pin, 1);
-    sleep_us(1);
-    gpio_put(driver->sck_pin, 0);
-    sleep_us(1);
-    gpio_set_function(driver->sck_pin, GPIO_FUNC_SPI);
 
-    if (driver->use_fqud_pin) {
-        if (!ad9850_driver_pulse_fqud(driver)) {
-            return false;
-        }
-    } else {
+    ad9850_manual_wclk_pulse(driver->sck_pin);
+    if (!ad9850_driver_pulse_fqud(driver)) {
+        gpio_set_function(driver->sck_pin, GPIO_FUNC_SPI);
         return false;
     }
+
+    gpio_set_function(driver->sck_pin, GPIO_FUNC_SPI);
 
     driver->serial_enabled = true;
     return true;
@@ -213,7 +240,7 @@ bool __not_in_flash_func(ad9850_driver_start_apply_nonblocking)(ad9850_driver_t 
         return false;
     }
 
-    driver->tx_frame_shadow = *frame;
+    ad9850_encode_wire_frame(frame, driver->tx_frame_shadow.bytes);
     driver->tx_next_index = 0u;
     driver->tx_pending_pulse_fqud = pulse_fqud;
     driver->tx_active = true;
@@ -245,12 +272,7 @@ void __not_in_flash_func(ad9850_driver_service_nonblocking)(ad9850_driver_t *dri
 
     bool success = true;
     if (driver->tx_pending_pulse_fqud) {
-        if (!driver->use_fqud_pin) {
-            success = false;
-        } else {
-            gpio_put(driver->fqud_pin, 1);
-            gpio_put(driver->fqud_pin, 0);
-        }
+        success = ad9850_driver_pulse_fqud(driver);
     }
 
     driver->tx_active = false;
@@ -259,7 +281,7 @@ void __not_in_flash_func(ad9850_driver_service_nonblocking)(ad9850_driver_t *dri
     driver->tx_result_ready = true;
 }
 
-bool ad9850_driver_is_nonblocking_busy(const ad9850_driver_t *driver)
+bool __not_in_flash_func(ad9850_driver_is_nonblocking_busy)(const ad9850_driver_t *driver)
 {
     if (driver == NULL || !driver->initialized) {
         return false;
@@ -268,7 +290,7 @@ bool ad9850_driver_is_nonblocking_busy(const ad9850_driver_t *driver)
     return driver->tx_active;
 }
 
-bool ad9850_driver_take_nonblocking_result(ad9850_driver_t *driver,
+bool __not_in_flash_func(ad9850_driver_take_nonblocking_result)(ad9850_driver_t *driver,
                                            bool *success_out)
 {
     if (driver == NULL || !driver->initialized || success_out == NULL) {

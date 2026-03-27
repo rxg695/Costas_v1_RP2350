@@ -3,39 +3,114 @@
 #include "driver/ad9850_driver/ad9850_driver.h"
 #include "hardware/spi.h"
 #include "pico/stdlib.h"
+#include "src/validation/validation_config.h"
 #include "src/validation/ad9850_validation.h"
 
 static uint32_t ftw_from_freq(uint32_t frequency_hz,
                               uint32_t dds_sysclk_hz)
 {
-    uint64_t numerator = ((uint64_t) frequency_hz) << 32;
+    uint64_t numerator = ((uint64_t) frequency_hz) << VALIDATION_AD9850_FTW_WIDTH_BITS;
     return (uint32_t) (numerator / (uint64_t) dds_sysclk_hz);
+}
+
+static uint8_t reverse_bits(uint8_t value)
+{
+    value = (uint8_t) (((value & VALIDATION_AD9850_REVERSE_MASK_A) >> VALIDATION_AD9850_REVERSE_SHIFT_NIBBLE) |
+                       ((value & VALIDATION_AD9850_REVERSE_MASK_B) << VALIDATION_AD9850_REVERSE_SHIFT_NIBBLE));
+    value = (uint8_t) (((value & VALIDATION_AD9850_REVERSE_MASK_C) >> VALIDATION_AD9850_REVERSE_SHIFT_PAIR) |
+                       ((value & VALIDATION_AD9850_REVERSE_MASK_D) << VALIDATION_AD9850_REVERSE_SHIFT_PAIR));
+    value = (uint8_t) (((value & VALIDATION_AD9850_REVERSE_MASK_E) >> VALIDATION_AD9850_REVERSE_SHIFT_BIT) |
+                       ((value & VALIDATION_AD9850_REVERSE_MASK_F) << VALIDATION_AD9850_REVERSE_SHIFT_BIT));
+    return value;
+}
+
+static void print_bytes_decimal_line(const char *label,
+                                     const uint8_t *bytes,
+                                     size_t count)
+{
+    printf("  %s:", label);
+    for (size_t index = 0; index < count; ++index) {
+        printf(" b%u=%3u", (unsigned) index, (unsigned) bytes[index]);
+    }
+    printf("\n");
+}
+
+static void print_bytes_hex_line(const char *label,
+                                 const uint8_t *bytes,
+                                 size_t count)
+{
+    printf("  %s:", label);
+    for (size_t index = 0; index < count; ++index) {
+        printf(" b%u=0x%02X", (unsigned) index, (unsigned) bytes[index]);
+    }
+    printf("\n");
 }
 
 static void print_byte_binary(uint8_t value)
 {
-    for (int bit = 7; bit >= 0; --bit) {
+    for (int bit = VALIDATION_AD9850_BINARY_MSB_INDEX; bit >= 0; --bit) {
         putchar((value & (1u << bit)) ? '1' : '0');
     }
 }
 
-static void print_frame_spi_order_binary(const ad9850_frame_t *frame)
+static void print_bytes_binary_line(const char *label,
+                                    const uint8_t *bytes,
+                                    size_t count)
+{
+    printf("  %s:", label);
+    for (size_t index = 0; index < count; ++index) {
+        printf(" b%u=", (unsigned) index);
+        print_byte_binary(bytes[index]);
+    }
+    printf("\n");
+}
+
+static void print_ftw_views(uint32_t ftw)
+{
+    uint8_t ftw_bytes[VALIDATION_AD9850_FTW_BYTE_COUNT] = {
+        (uint8_t) (ftw & VALIDATION_AD9850_BYTE_MASK),
+        (uint8_t) ((ftw >> VALIDATION_AD9850_SHIFT_8) & VALIDATION_AD9850_BYTE_MASK),
+        (uint8_t) ((ftw >> VALIDATION_AD9850_SHIFT_16) & VALIDATION_AD9850_BYTE_MASK),
+        (uint8_t) ((ftw >> VALIDATION_AD9850_SHIFT_24) & VALIDATION_AD9850_BYTE_MASK),
+    };
+    uint8_t wire_ftw_bytes[VALIDATION_AD9850_FTW_BYTE_COUNT];
+
+    for (size_t index = 0; index < VALIDATION_AD9850_FTW_BYTE_COUNT; ++index) {
+        wire_ftw_bytes[index] = reverse_bits(ftw_bytes[index]);
+    }
+
+    printf("  FTW bytes (logical LSB->MSB):\n");
+    print_bytes_decimal_line("dec", ftw_bytes, VALIDATION_AD9850_FTW_BYTE_COUNT);
+    print_bytes_hex_line("hex", ftw_bytes, VALIDATION_AD9850_FTW_BYTE_COUNT);
+    print_bytes_binary_line("bin", ftw_bytes, VALIDATION_AD9850_FTW_BYTE_COUNT);
+
+    printf("  FTW bytes (on-wire after per-byte bit reversal):\n");
+    print_bytes_decimal_line("dec", wire_ftw_bytes, VALIDATION_AD9850_FTW_BYTE_COUNT);
+    print_bytes_hex_line("hex", wire_ftw_bytes, VALIDATION_AD9850_FTW_BYTE_COUNT);
+    print_bytes_binary_line("bin", wire_ftw_bytes, VALIDATION_AD9850_FTW_BYTE_COUNT);
+}
+
+static void print_frame_views(const ad9850_frame_t *frame)
 {
     if (frame == NULL) {
         return;
     }
 
-    printf("Frame bits: b0=");
-    print_byte_binary(frame->bytes[0]);
-    printf(" b1=");
-    print_byte_binary(frame->bytes[1]);
-    printf(" b2=");
-    print_byte_binary(frame->bytes[2]);
-    printf(" b3=");
-    print_byte_binary(frame->bytes[3]);
-    printf(" b4=");
-    print_byte_binary(frame->bytes[4]);
-    printf("\n");
+    uint8_t wire_bytes[VALIDATION_AD9850_FRAME_BYTE_COUNT];
+
+    for (size_t index = 0; index < VALIDATION_AD9850_FRAME_BYTE_COUNT; ++index) {
+        wire_bytes[index] = reverse_bits(frame->bytes[index]);
+    }
+
+    printf("  Frame bytes (logical FTW-first):\n");
+    print_bytes_decimal_line("dec", frame->bytes, VALIDATION_AD9850_FRAME_BYTE_COUNT);
+    print_bytes_hex_line("hex", frame->bytes, VALIDATION_AD9850_FRAME_BYTE_COUNT);
+    print_bytes_binary_line("bin", frame->bytes, VALIDATION_AD9850_FRAME_BYTE_COUNT);
+
+    printf("  Frame bytes (on-wire SPI bytes):\n");
+    print_bytes_decimal_line("dec", wire_bytes, VALIDATION_AD9850_FRAME_BYTE_COUNT);
+    print_bytes_hex_line("hex", wire_bytes, VALIDATION_AD9850_FRAME_BYTE_COUNT);
+    print_bytes_binary_line("bin", wire_bytes, VALIDATION_AD9850_FRAME_BYTE_COUNT);
 }
 
 static void print_status(uint32_t frequency_hz,
@@ -57,9 +132,10 @@ static void print_status(uint32_t frequency_hz,
         serial_enabled ? "yes" : "no",
         nb_busy ? "yes" : "no");
     printf("  FTW: 0x%08lx\n", (unsigned long) ftw);
+    print_ftw_views(ftw);
 
     if (frame != NULL) {
-        print_frame_spi_order_binary(frame);
+        print_frame_views(frame);
     }
 }
 
@@ -70,14 +146,14 @@ void ad9850_validation_run(const ad9850_validation_config_t *config)
         return;
     }
 
-    uint32_t dds_sysclk_hz = config->dds_sysclk_hz == 0u ? 125000000u : config->dds_sysclk_hz;
-    uint32_t spi_baud_hz = config->spi_baud_hz == 0u ? 1000000u : config->spi_baud_hz;
-    uint8_t phase = (uint8_t) (config->phase & 0x1Fu);
-    uint32_t frequency_hz = config->frequency_hz == 0u ? 1000000u : config->frequency_hz;
-    uint32_t step_hz = 1000u;
+    uint32_t dds_sysclk_hz = config->dds_sysclk_hz == 0u ? VALIDATION_AD9850_DEFAULT_DDS_SYSCLK_HZ : config->dds_sysclk_hz;
+    uint32_t spi_baud_hz = config->spi_baud_hz == 0u ? VALIDATION_AD9850_FALLBACK_SPI_BAUD_HZ : config->spi_baud_hz;
+    uint8_t phase = (uint8_t) (config->phase & VALIDATION_AD9850_PHASE_MASK);
+    uint32_t frequency_hz = config->frequency_hz == 0u ? VALIDATION_AD9850_DEFAULT_FREQUENCY_HZ : config->frequency_hz;
+    uint32_t step_hz = VALIDATION_AD9850_DEFAULT_STEP_HZ;
     bool power_down = config->power_down;
 
-    spi_inst_t *spi = config->spi_index == 1u ? spi1 : spi0;
+    spi_inst_t *spi = config->spi_index == VALIDATION_AD9850_SPI_INDEX_1 ? spi1 : spi0;
 
     ad9850_driver_t driver;
     ad9850_driver_config_t driver_cfg = {
@@ -87,6 +163,7 @@ void ad9850_validation_run(const ad9850_validation_config_t *config)
         .mosi_pin = config->mosi_pin,
         .use_fqud_pin = config->use_fqud_pin,
         .fqud_pin = config->fqud_pin,
+        .fqud_pulse_us = config->fqud_pulse_us,
         .use_reset_pin = config->use_reset_pin,
         .reset_pin = config->reset_pin,
         .dds_sysclk_hz = dds_sysclk_hz,
@@ -107,13 +184,14 @@ void ad9850_validation_run(const ad9850_validation_config_t *config)
     uint32_t nb_complete_fail_count = 0u;
 
     printf("\nAD9850 validation active\n");
-    printf("SPI=%s baud=%lu Hz SCK=GP%u MOSI=GP%u FQ_UD=%s(GP%u) RESET=%s(GP%u) sysclk=%lu Hz\n",
+        printf("SPI=%s baud=%lu Hz SCK=GP%u MOSI=GP%u FQ_UD=%s(GP%u, %lu us) RESET=%s(GP%u) sysclk=%lu Hz\n",
            spi == spi0 ? "spi0" : "spi1",
            (unsigned long) spi_baud_hz,
            config->sck_pin,
            config->mosi_pin,
            config->use_fqud_pin ? "on" : "off",
            config->fqud_pin,
+            (unsigned long) (config->fqud_pulse_us == 0u ? VALIDATION_AD9850_DEFAULT_FQUD_PULSE_US : config->fqud_pulse_us),
            config->use_reset_pin ? "on" : "off",
            config->reset_pin,
            (unsigned long) dds_sysclk_hz);
@@ -215,7 +293,7 @@ void ad9850_validation_run(const ad9850_validation_config_t *config)
                          driver.serial_enabled,
                          ad9850_driver_is_nonblocking_busy(&driver));
         } else if (ch == '-') {
-            frequency_hz = frequency_hz > step_hz ? (frequency_hz - step_hz) : 1u;
+            frequency_hz = frequency_hz > step_hz ? (frequency_hz - step_hz) : VALIDATION_SYSCLK_STABILITY_MIN_SAMPLES_FALLBACK;
             ftw = ftw_from_freq(frequency_hz, dds_sysclk_hz);
             frame_ok = ad9850_driver_make_frame(ftw, phase, power_down, &frame);
             print_status(frequency_hz,

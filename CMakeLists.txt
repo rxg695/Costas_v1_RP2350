@@ -79,6 +79,8 @@ pico_enable_stdio_usb(Costas_V1_RP2350 1)
 # Add the standard library to the build
 target_link_libraries(Costas_V1_RP2350
     pico_stdlib
+    pico_multicore
+    pico_sync
     # Driver modules rely on direct PIO and clock APIs in both modes.
     hardware_pio
     hardware_clocks

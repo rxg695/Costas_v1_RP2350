@@ -4,13 +4,24 @@
 #include "hardware/irq.h"
 #include "pio_alarm_timer.pio.h"
 
+#define PIO_ALARM_TIMER_PIO_COUNT 3u
+
 // One registry slot per PIO block and state machine.
-static pio_alarm_timer_t *rx_irq_registry[2][4] = {0};
-static bool rx_irq_handler_installed[2] = {false, false};
+static pio_alarm_timer_t *rx_irq_registry[PIO_ALARM_TIMER_PIO_COUNT][4] = {0};
+static bool rx_irq_handler_installed[PIO_ALARM_TIMER_PIO_COUNT] = {false};
 
 static int pio_alarm_timer_pio_index(PIO pio)
 {
-    return pio == pio1 ? 1 : 0;
+    if (pio == pio0) {
+        return 0;
+    }
+    if (pio == pio1) {
+        return 1;
+    }
+    if (pio == pio2) {
+        return 2;
+    }
+    return -1;
 }
 
 static enum pio_interrupt_source pio_alarm_timer_rx_source_for_sm(uint sm)
@@ -27,7 +38,7 @@ static enum pio_interrupt_source pio_alarm_timer_rx_source_for_sm(uint sm)
     }
 }
 
-static void pio_alarm_timer_decode_result_raw(uint32_t raw_result,
+static void __not_in_flash_func(pio_alarm_timer_decode_result_raw)(uint32_t raw_result,
                                               pio_alarm_timer_result_t *decoded_out)
 {
     if (raw_result == PIO_ALARM_TIMER_RESULT_REARM_ACK) {
@@ -46,9 +57,13 @@ static void pio_alarm_timer_decode_result_raw(uint32_t raw_result,
     decoded_out->tick = raw_result;
 }
 
-static void pio_alarm_timer_irq0_dispatch(PIO pio)
+static void __not_in_flash_func(pio_alarm_timer_irq0_dispatch)(PIO pio)
 {
     int pio_index = pio_alarm_timer_pio_index(pio);
+    if (pio_index < 0) {
+        return;
+    }
+
     for (uint sm = 0; sm < 4; ++sm) {
         pio_alarm_timer_t *timer = rx_irq_registry[pio_index][sm];
         if (timer == NULL || timer->rx_callback == NULL) {
@@ -64,29 +79,42 @@ static void pio_alarm_timer_irq0_dispatch(PIO pio)
     }
 }
 
-static void pio0_irq0_handler(void)
+static void __not_in_flash_func(pio0_irq0_handler)(void)
 {
     pio_alarm_timer_irq0_dispatch(pio0);
 }
 
-static void pio1_irq0_handler(void)
+static void __not_in_flash_func(pio1_irq0_handler)(void)
 {
     pio_alarm_timer_irq0_dispatch(pio1);
+}
+
+static void __not_in_flash_func(pio2_irq0_handler)(void)
+{
+    pio_alarm_timer_irq0_dispatch(pio2);
 }
 
 static void pio_alarm_timer_ensure_irq_handler_installed(PIO pio)
 {
     int pio_index = pio_alarm_timer_pio_index(pio);
-    if (rx_irq_handler_installed[pio_index]) {
+    if (pio_index < 0 || rx_irq_handler_installed[pio_index]) {
         return;
     }
 
     if (pio_index == 0) {
         irq_set_exclusive_handler(PIO0_IRQ_0, pio0_irq0_handler);
+        irq_set_priority(PIO0_IRQ_0, 0);
         irq_set_enabled(PIO0_IRQ_0, true);
-    } else {
+    } else if (pio_index == 1) {
         irq_set_exclusive_handler(PIO1_IRQ_0, pio1_irq0_handler);
+        irq_set_priority(PIO1_IRQ_0, 0);
         irq_set_enabled(PIO1_IRQ_0, true);
+    } else if (pio_index == 2) {
+        irq_set_exclusive_handler(PIO2_IRQ_0, pio2_irq0_handler);
+        irq_set_priority(PIO2_IRQ_0, 0);
+        irq_set_enabled(PIO2_IRQ_0, true);
+    } else {
+        return;
     }
 
     rx_irq_handler_installed[pio_index] = true;
@@ -226,6 +254,9 @@ void pio_alarm_timer_set_rx_irq_callback(pio_alarm_timer_t *timer,
     timer->rx_irq_enabled = true;
 
     int pio_index = pio_alarm_timer_pio_index(timer->pio);
+    if (pio_index < 0) {
+        return;
+    }
     rx_irq_registry[pio_index][timer->sm] = timer;
 
     pio_set_irq0_source_enabled(timer->pio,
@@ -244,7 +275,9 @@ void pio_alarm_timer_clear_rx_irq_callback(pio_alarm_timer_t *timer)
                                 false);
 
     int pio_index = pio_alarm_timer_pio_index(timer->pio);
-    rx_irq_registry[pio_index][timer->sm] = NULL;
+    if (pio_index >= 0) {
+        rx_irq_registry[pio_index][timer->sm] = NULL;
+    }
 
     timer->rx_irq_enabled = false;
     timer->rx_callback = NULL;

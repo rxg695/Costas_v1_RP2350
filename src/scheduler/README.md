@@ -17,6 +17,8 @@ The scheduler is meant to turn a symbol plan into two synchronized timing stream
 
 At prepare time it builds those sequences in memory. At arm time it re-initializes the relevant state machines, queues the initial commands, and then lets the interrupt-driven feed path finish the run.
 
+In the current validation wiring, the output-compare pulse is also the AD9850 `FQ_UD` latch pulse. That means scheduler output timing is really DDS-latch timing, not just a generic marker stream.
+
 ## Public types
 
 ### `scheduler_state_t`
@@ -142,6 +144,19 @@ For a request with `N` symbols, the scheduler builds:
 
 The output side currently uses a `5x` scale factor relative to the alarm request ticks. That scaling is part of the module’s current timing model and is reflected in the validation tooling.
 
+There is one important translation step between the scheduler request and the continuous output-compare driver:
+
+- `dt0` and each `dts[k]` are interpreted as pulse-start to pulse-start spacing
+- the output-compare driver in continuous mode starts the next compare countdown only after the previous pulse finishes
+- because of that, the scheduler subtracts `output_pulse_ticks` from each post-first compare delay before queueing it into the output-compare FIFO
+
+Without that subtraction, the output pulse train would drift late by one pulse width per symbol relative to the alarm/DDS timing stream.
+
+The alarm side remains absolute-tick based. In validation mode, the scheduler therefore aligns two different timing models:
+
+- alarms are queued at absolute times relative to PPS
+- output compare is queued as a first absolute delay followed by pulse-finish-relative delays
+
 ## State machine
 
 Typical successful flow:
@@ -178,3 +193,4 @@ Use that path when you need to:
 - validation currently seeds only a short default frequency list
 - the scheduler stops at DDS and timing orchestration; it does not yet control rig/PTT state or RF-on capture in the production path
 - the output scaling and some startup behavior are still prototype-level decisions rather than a finalized interface contract
+- the current implementation assumes each scheduled DDS write completes before the next alarm boundary; this is intentional for the present timing model and should be treated as part of the scheduler contract until refactored

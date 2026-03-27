@@ -7,12 +7,14 @@
 #include "pio_alarm_timer.pio.h"
 #include "pio_timer_output_compare.pio.h"
 
-static bool output_compare_program_loaded[2] = {false, false};
-static uint output_compare_program_offset[2] = {0u, 0u};
-static bool alarm_timer_program_loaded[2] = {false, false};
-static uint alarm_timer_program_offset[2] = {0u, 0u};
-static scheduler_t *tx_irq_registry[2] = {0};
-static bool tx_irq_handler_installed[2] = {false, false};
+#define SCHEDULER_PIO_COUNT 3u
+
+static bool output_compare_program_loaded[SCHEDULER_PIO_COUNT] = {false};
+static uint output_compare_program_offset[SCHEDULER_PIO_COUNT] = {0u};
+static bool alarm_timer_program_loaded[SCHEDULER_PIO_COUNT] = {false};
+static uint alarm_timer_program_offset[SCHEDULER_PIO_COUNT] = {0u};
+static scheduler_t *tx_irq_registry[SCHEDULER_PIO_COUNT] = {0};
+static bool tx_irq_handler_installed[SCHEDULER_PIO_COUNT] = {false};
 
 static int scheduler_pio_slot(PIO pio);
 static void feed_output_compare_fifo(scheduler_t *scheduler);
@@ -25,6 +27,10 @@ static void scheduler_init_output_compare_sm(const scheduler_t *scheduler)
     }
 
     int slot = scheduler_pio_slot(scheduler->cfg.output_compare_pio);
+    if (slot < 0) {
+        return;
+    }
+
     pio_timer_output_compare_init(scheduler->cfg.output_compare_pio,
                                   scheduler->cfg.output_compare_sm,
                                   output_compare_program_offset[slot],
@@ -36,7 +42,16 @@ static void scheduler_init_output_compare_sm(const scheduler_t *scheduler)
 
 static int scheduler_pio_slot(PIO pio)
 {
-    return pio == pio1 ? 1 : 0;
+    if (pio == pio0) {
+        return 0;
+    }
+    if (pio == pio1) {
+        return 1;
+    }
+    if (pio == pio2) {
+        return 2;
+    }
+    return -1;
 }
 
 static enum pio_interrupt_source scheduler_tx_not_full_source_for_sm(uint sm)
@@ -128,7 +143,7 @@ static void sw_fifo_clear(scheduler_sw_fifo_t *fifo)
     fifo->count = 0u;
 }
 
-static void scheduler_service_ad9850_nonblocking(scheduler_t *scheduler)
+static void __not_in_flash_func(scheduler_service_ad9850_nonblocking)(scheduler_t *scheduler)
 {
     if (scheduler == NULL || scheduler->state == SCHEDULER_STATE_END_FAULT) {
         return;
@@ -142,9 +157,14 @@ static void scheduler_service_ad9850_nonblocking(scheduler_t *scheduler)
     }
 }
 
-static void scheduler_tx_irq_dispatch(PIO pio)
+static void __not_in_flash_func(scheduler_tx_irq_dispatch)(PIO pio)
 {
-    scheduler_t *scheduler = tx_irq_registry[scheduler_pio_slot(pio)];
+    int slot = scheduler_pio_slot(pio);
+    if (slot < 0) {
+        return;
+    }
+
+    scheduler_t *scheduler = tx_irq_registry[slot];
     if (scheduler == NULL) {
         return;
     }
@@ -158,29 +178,42 @@ static void scheduler_tx_irq_dispatch(PIO pio)
     }
 }
 
-static void scheduler_pio0_irq1_handler(void)
+static void __not_in_flash_func(scheduler_pio0_irq1_handler)(void)
 {
     scheduler_tx_irq_dispatch(pio0);
 }
 
-static void scheduler_pio1_irq1_handler(void)
+static void __not_in_flash_func(scheduler_pio1_irq1_handler)(void)
 {
     scheduler_tx_irq_dispatch(pio1);
+}
+
+static void __not_in_flash_func(scheduler_pio2_irq1_handler)(void)
+{
+    scheduler_tx_irq_dispatch(pio2);
 }
 
 static void scheduler_ensure_tx_irq_installed(PIO pio)
 {
     int slot = scheduler_pio_slot(pio);
-    if (tx_irq_handler_installed[slot]) {
+    if (slot < 0 || tx_irq_handler_installed[slot]) {
         return;
     }
 
     if (slot == 0) {
         irq_set_exclusive_handler(PIO0_IRQ_1, scheduler_pio0_irq1_handler);
+        irq_set_priority(PIO0_IRQ_1, 0);
         irq_set_enabled(PIO0_IRQ_1, true);
-    } else {
+    } else if (slot == 1) {
         irq_set_exclusive_handler(PIO1_IRQ_1, scheduler_pio1_irq1_handler);
+        irq_set_priority(PIO1_IRQ_1, 0);
         irq_set_enabled(PIO1_IRQ_1, true);
+    } else if (slot == 2) {
+        irq_set_exclusive_handler(PIO2_IRQ_1, scheduler_pio2_irq1_handler);
+        irq_set_priority(PIO2_IRQ_1, 0);
+        irq_set_enabled(PIO2_IRQ_1, true);
+    } else {
+        return;
     }
 
     tx_irq_handler_installed[slot] = true;
@@ -255,7 +288,16 @@ static bool scheduler_build_sequences(scheduler_t *scheduler,
         }
         scheduler->output_compare_sequence[i] = (uint32_t) output_abs;
 
-        if (!sw_fifo_push(&scheduler->output_fifo, (uint32_t) dt_scaled) ||
+        // Continuous output compare starts counting the next delay only after
+        // the previous pulse finishes, so convert requested pulse-start spacing
+        // into a compare delay by removing the programmed pulse width.
+        int64_t output_compare_delay = dt_scaled - (int64_t) scheduler->cfg.output_pulse_ticks;
+        if (output_compare_delay <= 0 || output_compare_delay > 0xFFFFFFFFll) {
+            scheduler->last_error = SCHEDULER_ERROR_SEQUENCE_OVERFLOW;
+            return false;
+        }
+
+        if (!sw_fifo_push(&scheduler->output_fifo, (uint32_t) output_compare_delay) ||
             !sw_fifo_push(&scheduler->output_fifo, scheduler->cfg.output_pulse_ticks)) {
             scheduler->last_error = SCHEDULER_ERROR_OUTPUT_ENQUEUE;
             return false;
@@ -447,13 +489,17 @@ bool scheduler_init(scheduler_t *scheduler,
     scheduler->last_error = SCHEDULER_ERROR_NONE;
 
     int output_slot = scheduler_pio_slot(config->output_compare_pio);
+    int alarm_slot = scheduler_pio_slot(config->alarm_timer_pio);
+    if (output_slot < 0 || alarm_slot < 0) {
+        return false;
+    }
+
     if (!output_compare_program_loaded[output_slot]) {
         output_compare_program_offset[output_slot] =
             pio_add_program(config->output_compare_pio, &pio_timer_output_compare_program);
         output_compare_program_loaded[output_slot] = true;
     }
 
-    int alarm_slot = scheduler_pio_slot(config->alarm_timer_pio);
     if (!alarm_timer_program_loaded[alarm_slot]) {
         alarm_timer_program_offset[alarm_slot] =
             pio_add_program(config->alarm_timer_pio, &pio_alarm_timer_program);
@@ -480,6 +526,7 @@ bool scheduler_init(scheduler_t *scheduler,
         .mosi_pin = config->ad9850_mosi_pin,
         .use_fqud_pin = config->ad9850_use_fqud_pin,
         .fqud_pin = config->ad9850_fqud_pin,
+        .fqud_pulse_us = config->ad9850_fqud_pulse_us,
         .use_reset_pin = config->ad9850_use_reset_pin,
         .reset_pin = config->ad9850_reset_pin,
         .dds_sysclk_hz = config->ad9850_sysclk_hz,
@@ -655,7 +702,7 @@ void scheduler_set_fault_callback(scheduler_t *scheduler,
     scheduler->fault_user_data = user_data;
 }
 
-void scheduler_on_tx_fifo_not_full_irq(scheduler_t *scheduler,
+void __not_in_flash_func(scheduler_on_tx_fifo_not_full_irq)(scheduler_t *scheduler,
                                        uint sm)
 {
     if (scheduler == NULL) {
@@ -730,7 +777,17 @@ void __not_in_flash_func(scheduler_on_alarm_result)(const pio_alarm_timer_result
         return;
     }
 
-    scheduler_service_ad9850_nonblocking(scheduler);
+    if (ad9850_driver_is_nonblocking_busy(&scheduler->ad9850)) {
+        scheduler_service_ad9850_nonblocking(scheduler);
+        if (!ad9850_driver_is_nonblocking_busy(&scheduler->ad9850)) {
+            bool success = false;
+            if (ad9850_driver_take_nonblocking_result(&scheduler->ad9850, &success) && !success) {
+                scheduler_raise_fault(scheduler, SCHEDULER_ERROR_AD9850);
+                return;
+            }
+        }
+    }
+
     if (ad9850_driver_is_nonblocking_busy(&scheduler->ad9850)) {
         scheduler_raise_fault(scheduler, SCHEDULER_ERROR_AD9850);
         return;
@@ -744,7 +801,6 @@ void __not_in_flash_func(scheduler_on_alarm_result)(const pio_alarm_timer_result
     }
 
     scheduler->next_write_symbol++;
-    scheduler_service_ad9850_nonblocking(scheduler);
 }
 
 scheduler_state_t scheduler_get_state(const scheduler_t *scheduler)

@@ -14,6 +14,10 @@ include(${CMAKE_CURRENT_LIST_DIR}/pio_timer_input_capture/driver_manifest.cmake)
 list(APPEND DRIVER_SOURCES ${DRIVER_MODULE_SOURCES})
 list(APPEND DRIVER_PIO_FILES ${DRIVER_MODULE_PIO_FILES})
 
+include(${CMAKE_CURRENT_LIST_DIR}/pio_sysclk_stability/driver_manifest.cmake)
+list(APPEND DRIVER_SOURCES ${DRIVER_MODULE_SOURCES})
+list(APPEND DRIVER_PIO_FILES ${DRIVER_MODULE_PIO_FILES})
+
 include(${CMAKE_CURRENT_LIST_DIR}/pio_timer_output_compare/driver_manifest.cmake)
 list(APPEND DRIVER_SOURCES ${DRIVER_MODULE_SOURCES})
 list(APPEND DRIVER_PIO_FILES ${DRIVER_MODULE_PIO_FILES})

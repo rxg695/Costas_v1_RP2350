@@ -1,0 +1,37 @@
+.program pio_sysclk_stability
+
+; One-time init: pull timeout loop count into OSR.
+; Then for each cycle:
+;   - Wait for a clean PPS rising edge.
+;   - Count until the same pin falls low and later rises high again.
+;   - Push remaining X on success, or 0xffffffff on timeout.
+; Each decrement consumes two state-machine cycles.
+
+    pull block
+
+.wrap_target
+    wait 0 pin 0
+    wait 1 pin 0
+
+    mov x, osr
+
+count_high:
+    jmp pin still_high
+    jmp count_low
+
+still_high:
+    jmp x-- count_high
+    jmp timed_out
+
+count_low:
+    jmp pin got_next_rise
+    jmp x-- count_low
+
+timed_out:
+    set x, 0
+    mov x, ~x
+
+got_next_rise:
+    mov isr, x
+    push block
+.wrap

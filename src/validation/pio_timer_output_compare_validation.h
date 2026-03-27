@@ -15,6 +15,7 @@ typedef struct {
     uint output_pin;
     bool continuous_mode;
     uint32_t sm_clk_hz;
+    uint32_t timing_sm_clk_hz;
     uint32_t compare_ns;
     uint32_t pulse_ns;
 } pio_timer_output_compare_validation_config_t;

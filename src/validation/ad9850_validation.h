@@ -14,6 +14,7 @@ typedef struct {
     uint mosi_pin;
     bool use_fqud_pin;
     uint fqud_pin;
+    uint32_t fqud_pulse_us;
     bool use_reset_pin;
     uint reset_pin;
     uint32_t dds_sysclk_hz;

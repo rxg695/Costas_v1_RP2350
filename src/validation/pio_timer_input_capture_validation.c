@@ -5,7 +5,14 @@
 #include "pico/stdio_usb.h"
 
 #include "driver/pio_timer_input_capture/pio_timer_input_capture.h"
+#include "src/validation/validation_config.h"
 #include "src/validation/pio_timer_input_capture_validation.h"
+
+static uint64_t ticks_to_ns(uint32_t timing_sm_clk_hz,
+                            uint32_t ticks)
+{
+    return ((uint64_t) ticks * VALIDATION_INPUT_CAPTURE_TICK_NUMERATOR_NS) / timing_sm_clk_hz;
+}
 
 static void print_input_capture_status(uint64_t total_valid_samples,
                         uint64_t total_timeout_count,
@@ -34,6 +41,7 @@ static void print_input_capture_status(uint64_t total_valid_samples,
 void pio_timer_input_capture_validation_run(const pio_timer_input_capture_validation_config_t *config)
 {
     pio_timer_input_capture_t capture;
+    uint32_t timing_sm_clk_hz = config->timing_sm_clk_hz == 0u ? config->sm_clk_hz : config->timing_sm_clk_hz;
     pio_timer_input_capture_init(&capture,
                      config->pio,
                      config->sm,
@@ -42,12 +50,13 @@ void pio_timer_input_capture_validation_run(const pio_timer_input_capture_valida
                      config->sm_clk_hz,
                      config->timeout_ns);
 
-    uint32_t loop_ns = (uint32_t) (2000000000ull / config->sm_clk_hz);
+    uint32_t loop_ns = (uint32_t) (VALIDATION_INPUT_CAPTURE_TICK_NUMERATOR_NS / timing_sm_clk_hz);
     printf("Input capture validation active: GP%u rising -> GP%u rising\n",
         config->start_pin,
         config->stop_pin);
-    printf("State-machine clock: %u Hz, loop resolution: %u ns, timeout: %lu ns\n",
+    printf("State-machine clock: %u Hz, timing clock: %u Hz, loop resolution: %u ns, timeout: %lu ns\n",
         config->sm_clk_hz,
+        timing_sm_clk_hz,
            loop_ns,
         (unsigned long) config->timeout_ns);
     printf("Block size: %lu valid samples. Press s for a run summary or q to stop.\n",
@@ -83,7 +92,7 @@ void pio_timer_input_capture_validation_run(const pio_timer_input_capture_valida
                 block_timeout_count++;
                 total_timeout_count++;
             } else {
-                uint64_t elapsed_ns = pio_timer_input_capture_ticks_to_ns(&capture, elapsed_ticks);
+                uint64_t elapsed_ns = ticks_to_ns(timing_sm_clk_hz, elapsed_ticks);
 
                 if (sample_index == 0) {
                     min_ticks = elapsed_ticks;

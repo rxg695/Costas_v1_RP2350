@@ -73,6 +73,7 @@ typedef struct {
     uint ad9850_mosi_pin;
     bool ad9850_use_fqud_pin;
     uint ad9850_fqud_pin;
+    uint32_t ad9850_fqud_pulse_us;
     bool ad9850_use_reset_pin;
     uint ad9850_reset_pin;
     uint32_t ad9850_sysclk_hz;

@@ -13,6 +13,7 @@ typedef struct {
 	uint start_pin;
 	uint stop_pin;
 	uint sm_clk_hz;
+	uint32_t timing_sm_clk_hz;
 	uint32_t timeout_ns;
 	uint32_t sample_count;
 	PIO pio;
