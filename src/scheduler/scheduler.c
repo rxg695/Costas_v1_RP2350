@@ -665,6 +665,30 @@ bool scheduler_reset(scheduler_t *scheduler)
                                  scheduler->cfg.alarm_timer_sm,
                                  false);
 
+    pio_sm_set_enabled(scheduler->cfg.output_compare_pio,
+                       scheduler->cfg.output_compare_sm,
+                       false);
+
+    if (scheduler->cfg.ad9850_use_fqud_pin) {
+        gpio_set_function(scheduler->cfg.ad9850_fqud_pin, GPIO_FUNC_SIO);
+        gpio_set_dir(scheduler->cfg.ad9850_fqud_pin, GPIO_OUT);
+        gpio_put(scheduler->cfg.ad9850_fqud_pin, 0);
+    }
+
+    if (!ad9850_driver_serial_enable(&scheduler->ad9850)) {
+        scheduler_raise_fault(scheduler, SCHEDULER_ERROR_AD9850);
+        return false;
+    }
+
+    ad9850_frame_t idle_frame;
+    if (!ad9850_driver_make_frame(0u, 0u, false, &idle_frame) ||
+        !ad9850_driver_apply_frame_blocking(&scheduler->ad9850,
+                                            &idle_frame,
+                                            true)) {
+        scheduler_raise_fault(scheduler, SCHEDULER_ERROR_AD9850);
+        return false;
+    }
+
     scheduler->state = SCHEDULER_STATE_INIT;
     scheduler->prepared = false;
     scheduler->symbol_count = 0u;
