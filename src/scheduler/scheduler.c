@@ -665,11 +665,6 @@ bool scheduler_reset(scheduler_t *scheduler)
                                  scheduler->cfg.alarm_timer_sm,
                                  false);
 
-    if (!ad9850_driver_serial_enable(&scheduler->ad9850)) {
-        scheduler_raise_fault(scheduler, SCHEDULER_ERROR_AD9850);
-        return false;
-    }
-
     scheduler->state = SCHEDULER_STATE_INIT;
     scheduler->prepared = false;
     scheduler->symbol_count = 0u;

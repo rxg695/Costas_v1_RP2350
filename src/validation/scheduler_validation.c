@@ -222,6 +222,7 @@ static void fill_prepare_request(const scheduler_validation_config_t *cfg,
                                  uint32_t *freq_hz)
 {
     static const uint32_t defaults[VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT] = VALIDATION_SCHEDULER_DEFAULT_FREQ_HZ_LIST;
+    uint32_t resolved_timing_sm_clk_hz = timing_sm_clk_hz(cfg);
 
     uint32_t symbol_count = cfg->symbol_count == 0u ? VALIDATION_SCHEDULER_DEFAULT_SYMBOL_COUNT : cfg->symbol_count;
     if (symbol_count > VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT) {
@@ -229,11 +230,10 @@ static void fill_prepare_request(const scheduler_validation_config_t *cfg,
     }
 
     for (uint32_t i = 0u; i < symbol_count; ++i) {
-        dts_ticks[i] = us_to_scheduler_request_ticks(cfg->dts_us, cfg->sm_clk_hz);
+        dts_ticks[i] = us_to_scheduler_request_ticks(cfg->dts_us, resolved_timing_sm_clk_hz);
         freq_hz[i] = defaults[i];
     }
 
-    uint32_t resolved_timing_sm_clk_hz = timing_sm_clk_hz(cfg);
     request->symbol_count = symbol_count;
     request->dt0 = us_to_scheduler_request_ticks(cfg->dt0_us, resolved_timing_sm_clk_hz);
     request->dts = dts_ticks;

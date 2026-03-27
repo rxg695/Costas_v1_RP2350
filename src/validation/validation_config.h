@@ -178,10 +178,12 @@
 #define VALIDATION_SYSCLK_MONITOR_DEFAULT_SM 1u
 
 // GPIO carrying the PPS reference used for clk_sys estimation.
-#define VALIDATION_SYSCLK_MONITOR_DEFAULT_PPS_PIN 8u
+#define VALIDATION_SYSCLK_MONITOR_DEFAULT_PPS_PIN 16u
 
-// Nominal monitor state-machine clock.
-#define VALIDATION_SYSCLK_MONITOR_DEFAULT_SM_CLK_HZ 100000000u
+// Nominal monitor state-machine clock. (kept the same as
+// the actual sysclk value to avoid overloading the monitor with stability-induced 
+// timing errors). In Hertz.
+#define VALIDATION_SYSCLK_MONITOR_DEFAULT_SM_CLK_HZ 150000000u
 
 // Timeout used to decide that a PPS edge was missed.
 #define VALIDATION_SYSCLK_MONITOR_DEFAULT_TIMEOUT_NS 1200000000u
@@ -203,7 +205,7 @@
 #define VALIDATION_SYSCLK_STABILITY_DEFAULT_SM 1u
 
 // PPS pin.
-#define VALIDATION_SYSCLK_STABILITY_DEFAULT_PPS_PIN 8u
+#define VALIDATION_SYSCLK_STABILITY_DEFAULT_PPS_PIN 16u
 
 // Nominal state-machine clock used during validator PPS runs (kept the same as
 // the actual sysclk value to avoid overloading the monitor with stability-induced 
@@ -252,7 +254,7 @@
 #define VALIDATION_AD9850_DEFAULT_MOSI_PIN 7u
 
 // GPIO used to pulse FQ_UD and latch the written frame.
-#define VALIDATION_AD9850_DEFAULT_FQUD_PIN 5u
+#define VALIDATION_AD9850_DEFAULT_FQUD_PIN 8u
 
 // Width of the FQ_UD pulse in microseconds.
 #define VALIDATION_AD9850_DEFAULT_FQUD_PULSE_US 1u
@@ -309,14 +311,14 @@
 #define VALIDATION_SCHEDULER_DEFAULT_ALARM_TIMER_SM 3u
 
 // Trigger pin used in the scheduler validation setup.
-#define VALIDATION_SCHEDULER_DEFAULT_TRIGGER_PIN 8u
+#define VALIDATION_SCHEDULER_DEFAULT_TRIGGER_PIN 16u
 
 // Output pin used in the scheduler validation setup. On the current bench this
 // pulse also serves as the AD9850 FQ_UD latch pulse.
-#define VALIDATION_SCHEDULER_DEFAULT_OUTPUT_PIN 5u
+#define VALIDATION_SCHEDULER_DEFAULT_OUTPUT_PIN 8u
 
 // PPS reference pin used in the scheduler validation setup.
-#define VALIDATION_SCHEDULER_DEFAULT_PPS_PIN 8u
+#define VALIDATION_SCHEDULER_DEFAULT_PPS_PIN 16u
 
 // Nominal scheduler state-machine clock.
 #define VALIDATION_SCHEDULER_DEFAULT_SM_CLK_HZ 100000000u
@@ -325,19 +327,19 @@
 #define VALIDATION_SCHEDULER_DEFAULT_OUTPUT_PULSE_US 1u
 
 // Time from PPS to the first symbol pulse.
-#define VALIDATION_SCHEDULER_DEFAULT_DT0_US 15u
+#define VALIDATION_SCHEDULER_DEFAULT_DT0_US 20u
 
 // Number of symbols in the generated default test sequence.
 #define VALIDATION_SCHEDULER_DEFAULT_SYMBOL_COUNT 8u
 
 // Spacing between later symbols in that sequence.
-#define VALIDATION_SCHEDULER_DEFAULT_DTS_US 10u
+#define VALIDATION_SCHEDULER_DEFAULT_DTS_US 100000u
 
 // Offset between the alarm/DDS-load event and the pulse schedule.
-#define VALIDATION_SCHEDULER_DEFAULT_LOAD_OFFSET_US 7
+#define VALIDATION_SCHEDULER_DEFAULT_LOAD_OFFSET_US 10
 
 // Default frequency table used to generate a quick scheduler run.
-#define VALIDATION_SCHEDULER_DEFAULT_FREQ_HZ_LIST {1500u, 900u, 1800u, 600u, 2400u, 2100u, 1200u, 0u}
+#define VALIDATION_SCHEDULER_DEFAULT_FREQ_HZ_LIST {14151500u, 14150900u, 14151800u, 14150600u, 14152400u, 14152100u, 14151200u, 0u}
 
 // Number of entries in the default scheduler frequency list above.
 #define VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT 8u
