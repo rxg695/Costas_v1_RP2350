@@ -681,7 +681,7 @@ bool scheduler_reset(scheduler_t *scheduler)
     }
 
     ad9850_frame_t idle_frame;
-    if (!ad9850_driver_make_frame(0u, 0u, false, &idle_frame) ||
+    if (!ad9850_driver_make_frame(0u, 0u, true, &idle_frame) ||
         !ad9850_driver_apply_frame_blocking(&scheduler->ad9850,
                                             &idle_frame,
                                             true)) {
