@@ -11,7 +11,7 @@ void pio_timer_output_compare_init(PIO pio,
                                    float sm_clk_hz,
                                    pio_timer_output_compare_mode_t mode)
 {
-    pio_gpio_init(pio, trigger_pin);
+    gpio_init(trigger_pin);
     gpio_set_dir(trigger_pin, GPIO_IN);
 
     pio_gpio_init(pio, output_pin);

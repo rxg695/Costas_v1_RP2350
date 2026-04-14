@@ -12,6 +12,7 @@
 #include "src/validation/pio_timer_output_compare_validation.h"
 #include "src/validation/scheduler_validation.h"
 #include "src/validation/validation_config.h"
+#include "src/validation/validation_status_leds.h"
 
 typedef struct {
     uint pio_index;
@@ -289,6 +290,15 @@ int main()
 {
     stdio_init_all();
 
+    const validation_status_led_config_t led_config = {
+        .running_pin = VALIDATION_STATUS_LED_RUNNING_PIN,
+        .initialized_pin = VALIDATION_STATUS_LED_INITIALIZED_PIN,
+        .prepared_pin = VALIDATION_STATUS_LED_PREPARED_PIN,
+        .armed_pin = VALIDATION_STATUS_LED_ARMED_PIN,
+        .error_pin = VALIDATION_STATUS_LED_ERROR_PIN,
+    };
+    validation_status_leds_init(&led_config);
+
     while (!stdio_usb_connected()) {
         sleep_ms(VALIDATION_CONSOLE_USB_WAIT_MS);
     }
@@ -361,6 +371,7 @@ int main()
         .output_pin = VALIDATION_SCHEDULER_DEFAULT_OUTPUT_PIN,
         .pps_pin = VALIDATION_SCHEDULER_DEFAULT_PPS_PIN,
         .sm_clk_hz = VALIDATION_SCHEDULER_DEFAULT_SM_CLK_HZ,
+        .use_effective_clock = false,
         .timing_sys_clk_hz = 0u,
         .configured_sys_clk_hz = 0u,
         .output_pulse_us = VALIDATION_SCHEDULER_DEFAULT_OUTPUT_PULSE_US,
@@ -378,6 +389,8 @@ int main()
         .symbol_count = VALIDATION_SCHEDULER_DEFAULT_SYMBOL_COUNT,
         .dts_us = VALIDATION_SCHEDULER_DEFAULT_DTS_US,
         .load_offset_us = VALIDATION_SCHEDULER_DEFAULT_LOAD_OFFSET_US,
+        .carrier_hz = VALIDATION_SCHEDULER_DEFAULT_CARRIER_HZ,
+        .baseband_hz = VALIDATION_SCHEDULER_DEFAULT_BASEBAND_HZ_LIST,
     };
 
     validation_clock_source_t clock_source = VALIDATION_CLOCK_SOURCE_SYSTEM;
@@ -490,6 +503,7 @@ int main()
                 printf("\nScheduler setup. Module-specific prompts will follow.\n");
                 {
                     scheduler_validation_config_t run_cfg = scheduler_cfg;
+                    run_cfg.use_effective_clock = clock_context.effective_selected;
                     run_cfg.timing_sys_clk_hz = clock_context.timing_sys_clk_hz;
                     run_cfg.configured_sys_clk_hz = clock_context.configured_sys_clk_hz;
                     scheduler_validation_run(&run_cfg);

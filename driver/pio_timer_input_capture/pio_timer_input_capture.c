@@ -52,8 +52,8 @@ void pio_timer_input_capture_init(pio_timer_input_capture_t *capture,
     }
     capture->offset = program_offset[pio_index];
 
-    pio_gpio_init(pio, start_pin);
-    pio_gpio_init(pio, stop_pin);
+    gpio_init(start_pin);
+    gpio_init(stop_pin);
     gpio_set_dir(start_pin, GPIO_IN);
     gpio_set_dir(stop_pin, GPIO_IN);
     pio_sm_set_consecutive_pindirs(pio, sm, start_pin, 1, false);

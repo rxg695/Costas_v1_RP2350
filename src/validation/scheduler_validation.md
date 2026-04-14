@@ -9,6 +9,7 @@ Interactive test module for the scheduler prototype in `src/scheduler/`.
 - `c` initialize, prepare, and preload the scheduler
 - `d` run timer orchestration through to completion
 - `e` run the fuller integration path with interactive control
+- `f` auto-run Costas bursts until stopped, using the current top-level clock-source selection
 
 ## Default inputs
 

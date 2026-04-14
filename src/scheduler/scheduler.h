@@ -117,6 +117,7 @@ typedef struct {
     scheduler_sw_fifo_t alarm_fifo;
 
     uint32_t symbol_count;
+    uint32_t alarm_count;
     uint32_t output_compare_sequence[SCHEDULER_MAX_SYMBOLS];
     uint32_t alarm_timer_sequence[SCHEDULER_MAX_SYMBOLS + 1u];
     ad9850_frame_t prepared_frames[SCHEDULER_MAX_SYMBOLS];

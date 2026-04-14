@@ -1,11 +1,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "driver/pio_sysclk_stability/pio_sysclk_stability_monitor.h"
 #include "hardware/spi.h"
 #include "pico/stdlib.h"
 #include "src/scheduler/scheduler.h"
 #include "src/validation/validation_config.h"
 #include "src/validation/scheduler_validation.h"
+#include "src/validation/validation_status_leds.h"
+
+// Keep the large scheduler runtime off the small Pico main stack.
+static scheduler_t scheduler_validation_runtime;
 
 static PIO resolve_pio(uint pio_index)
 {
@@ -48,6 +53,17 @@ static uint32_t us_to_scheduler_request_ticks(uint32_t us,
         request_ticks = 1u;
     }
     return request_ticks;
+}
+
+static uint32_t resolved_symbol_count(const scheduler_validation_config_t *cfg)
+{
+    uint32_t symbol_count = cfg == NULL || cfg->symbol_count == 0u
+                                ? VALIDATION_SCHEDULER_DEFAULT_SYMBOL_COUNT
+                                : cfg->symbol_count;
+    if (symbol_count > VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT) {
+        symbol_count = VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT;
+    }
+    return symbol_count;
 }
 
 static uint32_t timing_sm_clk_hz(const scheduler_validation_config_t *cfg)
@@ -183,6 +199,48 @@ static int32_t prompt_i32(const char *label,
     return (int32_t) value;
 }
 
+static void prompt_baseband_sequence(scheduler_validation_config_t *cfg)
+{
+    if (cfg == NULL) {
+        return;
+    }
+
+    uint32_t symbol_count = resolved_symbol_count(cfg);
+    for (uint32_t i = 0u; i < symbol_count; ++i) {
+        char label[48];
+        snprintf(label,
+                 sizeof(label),
+                 "Baseband frequency %lu (Hz, 0=off)",
+                 (unsigned long) (i + 1u));
+        cfg->baseband_hz[i] = prompt_u32(label, cfg->baseband_hz[i]);
+    }
+}
+
+static bool build_frequency_sequence(const scheduler_validation_config_t *cfg,
+                                     uint32_t *freq_hz,
+                                     uint32_t symbol_count)
+{
+    if (cfg == NULL || freq_hz == NULL) {
+        return false;
+    }
+
+    for (uint32_t i = 0u; i < symbol_count; ++i) {
+        if (cfg->baseband_hz[i] == 0u) {
+            freq_hz[i] = 0u;
+            continue;
+        }
+
+        uint64_t absolute_hz = (uint64_t) cfg->carrier_hz + (uint64_t) cfg->baseband_hz[i];
+        if (absolute_hz > VALIDATION_U32_MAX_VALUE) {
+            return false;
+        }
+
+        freq_hz[i] = (uint32_t) absolute_hz;
+    }
+
+    return true;
+}
+
 static void prompt_common_config(scheduler_validation_config_t *cfg)
 {
     if (cfg == NULL) {
@@ -214,6 +272,8 @@ static void prompt_common_config(scheduler_validation_config_t *cfg)
     cfg->symbol_count = prompt_u32("Symbol count", cfg->symbol_count);
     cfg->dts_us = prompt_u32("Per-symbol spacing dts (us)", cfg->dts_us);
     cfg->load_offset_us = prompt_i32("Alarm load offset (us)", cfg->load_offset_us);
+    cfg->carrier_hz = prompt_u32("Carrier frequency (Hz)", cfg->carrier_hz);
+    prompt_baseband_sequence(cfg);
 }
 
 static void fill_prepare_request(const scheduler_validation_config_t *cfg,
@@ -221,17 +281,18 @@ static void fill_prepare_request(const scheduler_validation_config_t *cfg,
                                  uint32_t *dts_ticks,
                                  uint32_t *freq_hz)
 {
-    static const uint32_t defaults[VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT] = VALIDATION_SCHEDULER_DEFAULT_FREQ_HZ_LIST;
     uint32_t resolved_timing_sm_clk_hz = timing_sm_clk_hz(cfg);
-
-    uint32_t symbol_count = cfg->symbol_count == 0u ? VALIDATION_SCHEDULER_DEFAULT_SYMBOL_COUNT : cfg->symbol_count;
-    if (symbol_count > VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT) {
-        symbol_count = VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT;
-    }
+    uint32_t symbol_count = resolved_symbol_count(cfg);
 
     for (uint32_t i = 0u; i < symbol_count; ++i) {
         dts_ticks[i] = us_to_scheduler_request_ticks(cfg->dts_us, resolved_timing_sm_clk_hz);
-        freq_hz[i] = defaults[i];
+    }
+
+    if (!build_frequency_sequence(cfg, freq_hz, symbol_count)) {
+        printf("Carrier/baseband sequence overflowed 32-bit frequency range; forcing all symbols off.\n");
+        for (uint32_t i = 0u; i < symbol_count; ++i) {
+            freq_hz[i] = 0u;
+        }
     }
 
     request->symbol_count = symbol_count;
@@ -276,6 +337,11 @@ static bool init_scheduler(const scheduler_validation_config_t *cfg,
     return scheduler_init(scheduler, &scheduler_cfg);
 }
 
+static void update_scheduler_status_leds(const scheduler_t *scheduler)
+{
+    validation_status_leds_update_scheduler(scheduler);
+}
+
 static void print_scheduler_report(const scheduler_t *scheduler,
                                    const char *label)
 {
@@ -306,36 +372,131 @@ static void print_report_legend(void)
     printf("        rearm_ack=rearm acknowledgements, out_feed=output FIFO feeds, alarm_feed=alarm FIFO feeds\n");
 }
 
+static void refresh_effective_clock_if_selected(scheduler_validation_config_t *cfg)
+{
+    if (cfg == NULL || !cfg->use_effective_clock) {
+        return;
+    }
+
+    pio_sysclk_stability_monitor_snapshot_t snapshot;
+    if (!pio_sysclk_stability_monitor_get_snapshot(&snapshot) ||
+        snapshot.configured_sys_clk_hz == 0u ||
+        snapshot.effective_sys_clk_hz == 0u ||
+        snapshot.updates_published == 0u) {
+        return;
+    }
+
+    cfg->configured_sys_clk_hz = snapshot.configured_sys_clk_hz;
+    cfg->timing_sys_clk_hz = snapshot.effective_sys_clk_hz;
+}
+
+static void run_disciplined_costas_auto(scheduler_validation_config_t *cfg)
+{
+    prompt_common_config(cfg);
+    refresh_effective_clock_if_selected(cfg);
+
+    scheduler_t *scheduler = &scheduler_validation_runtime;
+    if (!init_scheduler(cfg, scheduler)) {
+        update_scheduler_status_leds(scheduler);
+        printf("Scheduler initialization failed.\n");
+        return;
+    }
+    update_scheduler_status_leds(scheduler);
+
+    printf("Automatic Costas mode active. Uses the current global clock-source selection. Press q to stop after the current burst.\n");
+
+    while (true) {
+        refresh_effective_clock_if_selected(cfg);
+
+        scheduler_prepare_request_t request;
+        uint32_t dts_ticks[VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT];
+        uint32_t freq_hz[VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT];
+        fill_prepare_request(cfg, &request, dts_ticks, freq_hz);
+
+        if (!scheduler_prepare(scheduler, &request)) {
+            update_scheduler_status_leds(scheduler);
+            printf("Scheduler prepare step failed.\n");
+            print_scheduler_report(scheduler, "prepare_fail");
+            break;
+        }
+        update_scheduler_status_leds(scheduler);
+
+        if (!scheduler_arm(scheduler)) {
+            update_scheduler_status_leds(scheduler);
+            printf("Scheduler arm step failed.\n");
+            print_scheduler_report(scheduler, "arm_fail");
+            break;
+        }
+        update_scheduler_status_leds(scheduler);
+
+        bool stop_requested = false;
+        while (scheduler_get_state(scheduler) == SCHEDULER_STATE_ARM) {
+            update_scheduler_status_leds(scheduler);
+            int ch = getchar_timeout_us(0);
+            if (ch == 'q' || ch == 'Q') {
+                stop_requested = true;
+            }
+            tight_loop_contents();
+        }
+
+        update_scheduler_status_leds(scheduler);
+        print_scheduler_report(scheduler, "disciplined_end");
+        if (scheduler_get_state(scheduler) == SCHEDULER_STATE_END_OK) {
+            bool reset_ok = scheduler_reset(scheduler);
+            update_scheduler_status_leds(scheduler);
+            printf("Cleanup reset: %s\n", reset_ok ? "ok" : "failed");
+            if (!reset_ok) {
+                break;
+            }
+        } else {
+            break;
+        }
+
+        if (stop_requested) {
+            break;
+        }
+    }
+}
+
 static void run_sequence_building(scheduler_validation_config_t *cfg)
 {
     prompt_common_config(cfg);
     printf("Building sequences and preparing the scheduler...\n");
 
-    scheduler_t scheduler;
-    if (!init_scheduler(cfg, &scheduler)) {
+    scheduler_t *scheduler = &scheduler_validation_runtime;
+    if (!init_scheduler(cfg, scheduler)) {
+        update_scheduler_status_leds(scheduler);
         printf("Scheduler initialization failed.\n");
         return;
     }
+    update_scheduler_status_leds(scheduler);
 
     scheduler_prepare_request_t request;
     uint32_t dts_ticks[VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT];
     uint32_t freq_hz[VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT];
     fill_prepare_request(cfg, &request, dts_ticks, freq_hz);
 
-    bool ok = scheduler_prepare(&scheduler, &request);
+    bool ok = scheduler_prepare(scheduler, &request);
+    update_scheduler_status_leds(scheduler);
     printf("prepare=%s\n", ok ? "ok" : "failed");
-    print_scheduler_report(&scheduler, "sequence");
+    print_scheduler_report(scheduler, "sequence");
 
     if (ok) {
+        printf("DDS frequency sequence (Hz): ");
+        for (uint32_t i = 0u; i < request.symbol_count; ++i) {
+            printf("%lu ", (unsigned long) freq_hz[i]);
+        }
+        printf("\n");
+
         printf("Output compare sequence (ticks): ");
         for (uint32_t i = 0u; i < request.symbol_count; ++i) {
-            printf("%lu ", (unsigned long) scheduler.output_compare_sequence[i]);
+            printf("%lu ", (unsigned long) scheduler->output_compare_sequence[i]);
         }
         printf("\n");
 
         printf("Alarm timer sequence (ticks): ");
         for (uint32_t i = 0u; i < (request.symbol_count + 1u); ++i) {
-            printf("%lu ", (unsigned long) scheduler.alarm_timer_sequence[i]);
+            printf("%lu ", (unsigned long) scheduler->alarm_timer_sequence[i]);
         }
         printf("\n");
     }
@@ -346,11 +507,12 @@ static void run_initialization(scheduler_validation_config_t *cfg)
     prompt_common_config(cfg);
     printf("Initializing the scheduler only...\n");
 
-    scheduler_t scheduler;
-    bool ok = init_scheduler(cfg, &scheduler);
+    scheduler_t *scheduler = &scheduler_validation_runtime;
+    bool ok = init_scheduler(cfg, scheduler);
+    update_scheduler_status_leds(scheduler);
     printf("Initialization: %s\n", ok ? "ok" : "failed");
     if (ok) {
-        print_scheduler_report(&scheduler, "init");
+        print_scheduler_report(scheduler, "init");
     }
 }
 
@@ -359,26 +521,30 @@ static void run_prepare_preload(scheduler_validation_config_t *cfg)
     prompt_common_config(cfg);
     printf("Initializing and preloading the scheduler...\n");
 
-    scheduler_t scheduler;
-    if (!init_scheduler(cfg, &scheduler)) {
+    scheduler_t *scheduler = &scheduler_validation_runtime;
+    if (!init_scheduler(cfg, scheduler)) {
+        update_scheduler_status_leds(scheduler);
         printf("Scheduler initialization failed.\n");
         return;
     }
+    update_scheduler_status_leds(scheduler);
 
     scheduler_prepare_request_t request;
     uint32_t dts_ticks[VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT];
     uint32_t freq_hz[VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT];
     fill_prepare_request(cfg, &request, dts_ticks, freq_hz);
 
-    bool ok = scheduler_prepare(&scheduler, &request);
+    bool ok = scheduler_prepare(scheduler, &request);
+    update_scheduler_status_leds(scheduler);
     printf("Prepare: %s\n", ok ? "ok" : "failed");
-    print_scheduler_report(&scheduler, "prepare");
+    print_scheduler_report(scheduler, "prepare");
 
     if (ok) {
-        scheduler.state = SCHEDULER_STATE_END_OK;
-        bool reset_ok = scheduler_reset(&scheduler);
+        scheduler->state = SCHEDULER_STATE_END_OK;
+        bool reset_ok = scheduler_reset(scheduler);
+        update_scheduler_status_leds(scheduler);
         printf("Cleanup reset: %s\n", reset_ok ? "ok" : "failed");
-        print_scheduler_report(&scheduler, "after_cleanup");
+        print_scheduler_report(scheduler, "after_cleanup");
     }
 }
 
@@ -387,22 +553,26 @@ static void run_timer_orchestration(scheduler_validation_config_t *cfg)
     prompt_common_config(cfg);
     printf("Preparing the timer-orchestration validation path...\n");
 
-    scheduler_t scheduler;
-    if (!init_scheduler(cfg, &scheduler)) {
+    scheduler_t *scheduler = &scheduler_validation_runtime;
+    if (!init_scheduler(cfg, scheduler)) {
+        update_scheduler_status_leds(scheduler);
         printf("Scheduler initialization failed.\n");
         return;
     }
+    update_scheduler_status_leds(scheduler);
 
     scheduler_prepare_request_t request;
     uint32_t dts_ticks[VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT];
     uint32_t freq_hz[VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT];
     fill_prepare_request(cfg, &request, dts_ticks, freq_hz);
 
-    if (!scheduler_prepare(&scheduler, &request)) {
+    if (!scheduler_prepare(scheduler, &request)) {
+        update_scheduler_status_leds(scheduler);
         printf("Scheduler prepare step failed.\n");
-        print_scheduler_report(&scheduler, "prepare_fail");
+        print_scheduler_report(scheduler, "prepare_fail");
         return;
     }
+    update_scheduler_status_leds(scheduler);
 
     print_report_legend();
 
@@ -415,22 +585,26 @@ static void run_timer_orchestration(scheduler_validation_config_t *cfg)
         }
 
         if (ch == 'a' || ch == 'A') {
-            bool arm_ok = scheduler_arm(&scheduler);
+            bool arm_ok = scheduler_arm(scheduler);
+            update_scheduler_status_leds(scheduler);
             printf("Arm: %s\n", arm_ok ? "ok" : "failed");
             if (!arm_ok) {
-                print_scheduler_report(&scheduler, "arm_fail");
+                print_scheduler_report(scheduler, "arm_fail");
                 continue;
             }
 
-            while (scheduler_get_state(&scheduler) == SCHEDULER_STATE_ARM) {
+            while (scheduler_get_state(scheduler) == SCHEDULER_STATE_ARM) {
+                update_scheduler_status_leds(scheduler);
                 tight_loop_contents();
             }
 
-            print_scheduler_report(&scheduler, "end");
-            if (scheduler_get_state(&scheduler) == SCHEDULER_STATE_END_OK) {
-                bool reset_ok = scheduler_reset(&scheduler);
+            update_scheduler_status_leds(scheduler);
+            print_scheduler_report(scheduler, "end");
+            if (scheduler_get_state(scheduler) == SCHEDULER_STATE_END_OK) {
+                bool reset_ok = scheduler_reset(scheduler);
+                update_scheduler_status_leds(scheduler);
                 printf("Cleanup reset: %s\n", reset_ok ? "ok" : "failed");
-                print_scheduler_report(&scheduler, "cleanup");
+                print_scheduler_report(scheduler, "cleanup");
             }
             return;
         }
@@ -446,8 +620,9 @@ static void run_full_integration(scheduler_validation_config_t *cfg)
 {
     prompt_common_config(cfg);
 
-    scheduler_t scheduler;
+    scheduler_t *scheduler = &scheduler_validation_runtime;
     bool initialized = false;
+    validation_status_leds_clear_scheduler();
 
     print_report_legend();
     printf("Full integration commands: i=init, p=prepare, a=arm, s=status, q=return\n");
@@ -459,10 +634,11 @@ static void run_full_integration(scheduler_validation_config_t *cfg)
         }
 
         if (ch == 'i' || ch == 'I') {
-            initialized = init_scheduler(cfg, &scheduler);
+            initialized = init_scheduler(cfg, scheduler);
+            update_scheduler_status_leds(scheduler);
             printf("Initialization: %s\n", initialized ? "ok" : "failed");
             if (initialized) {
-                print_scheduler_report(&scheduler, "init");
+                print_scheduler_report(scheduler, "init");
             }
         } else if (ch == 'p' || ch == 'P') {
             if (!initialized) {
@@ -475,35 +651,41 @@ static void run_full_integration(scheduler_validation_config_t *cfg)
             uint32_t freq_hz[VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT];
             fill_prepare_request(cfg, &request, dts_ticks, freq_hz);
 
-            bool ok = scheduler_prepare(&scheduler, &request);
+            bool ok = scheduler_prepare(scheduler, &request);
+            update_scheduler_status_leds(scheduler);
             printf("Prepare: %s\n", ok ? "ok" : "failed");
-            print_scheduler_report(&scheduler, "prepare");
+            print_scheduler_report(scheduler, "prepare");
         } else if (ch == 'a' || ch == 'A') {
             if (!initialized) {
                 printf("Initialize the scheduler first.\n");
                 continue;
             }
 
-            bool ok = scheduler_arm(&scheduler);
+            bool ok = scheduler_arm(scheduler);
+            update_scheduler_status_leds(scheduler);
             printf("Arm: %s\n", ok ? "ok" : "failed");
             if (!ok) {
-                print_scheduler_report(&scheduler, "arm_fail");
+                print_scheduler_report(scheduler, "arm_fail");
                 continue;
             }
 
-            while (scheduler_get_state(&scheduler) == SCHEDULER_STATE_ARM) {
+            while (scheduler_get_state(scheduler) == SCHEDULER_STATE_ARM) {
+                update_scheduler_status_leds(scheduler);
                 tight_loop_contents();
             }
 
-            print_scheduler_report(&scheduler, "end");
-            if (scheduler_get_state(&scheduler) == SCHEDULER_STATE_END_OK) {
-                scheduler.state = SCHEDULER_STATE_END_OK;
-                (void) scheduler_reset(&scheduler);
-                print_scheduler_report(&scheduler, "idle_after_end");
+            update_scheduler_status_leds(scheduler);
+            print_scheduler_report(scheduler, "end");
+            if (scheduler_get_state(scheduler) == SCHEDULER_STATE_END_OK) {
+                scheduler->state = SCHEDULER_STATE_END_OK;
+                (void) scheduler_reset(scheduler);
+                update_scheduler_status_leds(scheduler);
+                print_scheduler_report(scheduler, "idle_after_end");
             }
         } else if (ch == 's' || ch == 'S') {
             if (initialized) {
-                print_scheduler_report(&scheduler, "status");
+                update_scheduler_status_leds(scheduler);
+                print_scheduler_report(scheduler, "status");
             } else {
                 printf("Scheduler has not been initialized yet.\n");
             }
@@ -522,6 +704,7 @@ void scheduler_validation_run(const scheduler_validation_config_t *config)
     }
 
     scheduler_validation_config_t cfg = *config;
+    validation_status_leds_clear_scheduler();
 
     printf("\n=== Scheduler Validation ===\n");
     while (true) {
@@ -530,6 +713,7 @@ void scheduler_validation_run(const scheduler_validation_config_t *config)
         printf("c) Prepare/preload      Run init + prepare + cleanup\n");
         printf("d) Timer orchestration  Arm once and wait for the run to finish\n");
         printf("e) Full integration     Step through init, prepare, arm, and status manually\n");
+        printf("f) Auto Costas          Auto-run Costas bursts using the current clock source\n");
         printf("q) Return\n");
         printf("Choose a scheduler mode: ");
 
@@ -546,12 +730,16 @@ void scheduler_validation_run(const scheduler_validation_config_t *config)
             run_timer_orchestration(&cfg);
         } else if (line[0] == 'e' || line[0] == 'E') {
             run_full_integration(&cfg);
+        } else if (line[0] == 'f' || line[0] == 'F') {
+            run_disciplined_costas_auto(&cfg);
         } else if (line[0] == 'q' || line[0] == 'Q') {
             break;
         } else {
-            printf("Unknown selection. Choose a-e or q.\n");
+            printf("Unknown selection. Choose a-f or q.\n");
         }
 
         printf("\n");
     }
+
+    validation_status_leds_clear_scheduler();
 }

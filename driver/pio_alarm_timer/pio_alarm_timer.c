@@ -141,7 +141,7 @@ void pio_alarm_timer_init(pio_alarm_timer_t *timer,
 {
     pio_sm_config config = pio_alarm_timer_program_get_default_config(offset);
 
-    pio_gpio_init(pio, pps_pin);
+    gpio_init(pps_pin);
     gpio_set_dir(pps_pin, GPIO_IN);
     sm_config_set_in_pins(&config, pps_pin);
 

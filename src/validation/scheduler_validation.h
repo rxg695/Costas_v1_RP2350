@@ -16,6 +16,7 @@ typedef struct {
     uint output_pin;
     uint pps_pin;
     uint32_t sm_clk_hz;
+    bool use_effective_clock;
     uint32_t timing_sys_clk_hz;
     uint32_t configured_sys_clk_hz;
     uint32_t output_pulse_us;
@@ -35,6 +36,8 @@ typedef struct {
     uint32_t symbol_count;
     uint32_t dts_us;
     int32_t load_offset_us;
+    uint32_t carrier_hz;
+    uint32_t baseband_hz[8];
 } scheduler_validation_config_t;
 
 /**

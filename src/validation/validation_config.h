@@ -43,6 +43,30 @@
 // Number of top-level menu entries currently exposed by the validation console.
 #define VALIDATION_CONSOLE_MODULE_COUNT 7u
 
+// Use this value to disable any optional validation status LED pin.
+#define VALIDATION_STATUS_LED_DISABLED_PIN 0xFFFFFFFFu
+
+// Heartbeat LED: blinks once every two seconds while validation firmware runs.
+#define VALIDATION_STATUS_LED_RUNNING_PIN VALIDATION_STATUS_LED_DISABLED_PIN
+
+// Scheduler initialized LED: on while the scheduler runtime is initialized.
+#define VALIDATION_STATUS_LED_INITIALIZED_PIN VALIDATION_STATUS_LED_DISABLED_PIN
+
+// Scheduler prepared LED: on while a prepared sequence is pending or active.
+#define VALIDATION_STATUS_LED_PREPARED_PIN VALIDATION_STATUS_LED_DISABLED_PIN
+
+// Scheduler armed LED: on while the scheduler is actively armed.
+#define VALIDATION_STATUS_LED_ARMED_PIN VALIDATION_STATUS_LED_DISABLED_PIN
+
+// Scheduler error LED: on whenever the current scheduler status reports an error.
+#define VALIDATION_STATUS_LED_ERROR_PIN VALIDATION_STATUS_LED_DISABLED_PIN
+
+// Heartbeat LED pulse width.
+#define VALIDATION_STATUS_LED_RUNNING_PULSE_MS 100u
+
+// Heartbeat LED repetition period.
+#define VALIDATION_STATUS_LED_RUNNING_PERIOD_MS 2000u
+
 // Menu value meaning: use the configured clk_sys value exactly as requested.
 #define VALIDATION_CLOCK_SOURCE_SYSTEM_VALUE 0u
 
@@ -338,11 +362,17 @@
 // Offset between the alarm/DDS-load event and the pulse schedule.
 #define VALIDATION_SCHEDULER_DEFAULT_LOAD_OFFSET_US 10
 
-// Default frequency table used to generate a quick scheduler run.
-#define VALIDATION_SCHEDULER_DEFAULT_FREQ_HZ_LIST {14151500u, 14150900u, 14151800u, 14150600u, 14152400u, 14152100u, 14151200u, 0u}
-
-// Number of entries in the default scheduler frequency list above.
+// Number of entries in the default scheduler frequency list.
 #define VALIDATION_SCHEDULER_DEFAULT_FREQ_COUNT 8u
+
+// Default RF carrier frequency used by the scheduler validation UI.
+#define VALIDATION_SCHEDULER_DEFAULT_CARRIER_HZ 14150000u
+
+// Default baseband frequency list used by the scheduler validation UI.
+// Each non-zero entry is added to the carrier to build the legacy absolute
+// scheduler frequency list. A zero entry is kept as zero so the UI can still
+// express the legacy "off" symbol at the end of a burst.
+#define VALIDATION_SCHEDULER_DEFAULT_BASEBAND_HZ_LIST {1500u, 900u, 1800u, 600u, 2400u, 2100u, 1200u, 0u}
 
 // =============================================================================
 // 6. Advanced / Magic Values

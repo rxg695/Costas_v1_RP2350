@@ -52,6 +52,7 @@ add_executable(Costas_V1_RP2350 ${APP_MAIN_SOURCE})
 
 if(PIO_TIMER_CAPTURE_VALIDATION)
     target_sources(Costas_V1_RP2350 PRIVATE
+        src/validation/validation_status_leds.c
         src/validation/pio_timer_input_capture_validation.c
         src/validation/pio_timer_output_compare_validation.c
         src/validation/pio_alarm_timer_validation.c

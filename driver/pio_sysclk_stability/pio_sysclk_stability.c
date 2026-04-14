@@ -52,7 +52,7 @@ void pio_sysclk_stability_init(pio_sysclk_stability_t *capture,
     }
     capture->offset = program_offset[pio_index];
 
-    pio_gpio_init(pio, pps_pin);
+    gpio_init(pps_pin);
     gpio_set_dir(pps_pin, GPIO_IN);
     pio_sm_set_consecutive_pindirs(pio, sm, pps_pin, 1, false);
 
